@@ -1,0 +1,268 @@
+# ── Result extraction and summarisation ───────────────────────────────────
+#
+# Maps Turing generated quantities (NamedTuples of infections, R, reports)
+# back to dated DataFrames with credible intervals.
+
+"""
+    EstimateInfectionsResult
+
+Result of `estimate_infections()`.
+"""
+struct EstimateInfectionsResult
+    fit::EpiNow2Fit
+    observations::EpiData
+    infections::DataFrame     # by date of infection
+    reports::DataFrame        # by date of report
+    rt::DataFrame             # reproduction number by date
+    growth_rate::DataFrame    # growth rate by date
+    timing::Float64           # seconds
+end
+
+"""
+    EpinowResult
+
+Result of `epinow()`.
+"""
+struct EpinowResult
+    estimates::EstimateInfectionsResult
+    forecasts::Union{DataFrame, Nothing}
+    timing::Float64
+end
+
+# ── Accessors ────────────────────────────────────────────────────────────
+
+"""
+    get_samples(result; variable=nothing) -> DataFrame
+
+Extract raw posterior samples as a long-format DataFrame.
+
+Columns: `date`, `variable`, `sample`, `value`
+"""
+function get_samples(result::EstimateInfectionsResult; variable=nothing)
+    fit = result.fit
+    meta = fit.metadata
+    gqs = fit.generated_quantities
+
+    dates = _output_dates(meta)
+    rows = []
+
+    for (i, gq) in enumerate(gqs)
+        for (var, values) in pairs(gq)
+            var_sym = Symbol(var)
+            (!isnothing(variable) && var_sym != variable) && continue
+            for (t, v) in enumerate(values)
+                t > length(dates) && continue
+                push!(rows, (
+                    date=dates[t], variable=var_sym,
+                    sample=i, value=Float64(v)
+                ))
+            end
+        end
+    end
+
+    DataFrame(rows)
+end
+
+get_samples(result::EpinowResult; kwargs...) =
+    get_samples(result.estimates; kwargs...)
+
+"""
+    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9])
+
+Extract case predictions.
+"""
+function get_predictions(
+    result::EstimateInfectionsResult;
+    format::Symbol=:summary,
+    CrIs::Vector{Float64}=[0.2, 0.5, 0.9]
+)
+    if format == :summary
+        return result.reports
+    elseif format == :sample
+        return get_samples(result; variable=:reports)
+    elseif format == :quantile
+        samples = get_samples(result; variable=:reports)
+        return _samples_to_quantiles(samples, CrIs)
+    end
+end
+
+"""
+    get_parameters(result) -> Dict{Symbol, Any}
+
+Extract fitted scalar parameters from the chain.
+"""
+function get_parameters(result::EstimateInfectionsResult)
+    chain = result.fit.chain
+    params = Dict{Symbol, Any}()
+    for name in names(chain)
+        # Skip array parameters (infections[1], etc.)
+        occursin("[", string(name)) && continue
+        params[Symbol(name)] = vec(Array(chain[name]))
+    end
+    params
+end
+
+# ── Summary ──────────────────────────────────────────────────────────────
+
+function Base.summary(
+    result::EstimateInfectionsResult;
+    type::Symbol=:snapshot,
+    target_date::Union{Date, Nothing}=nothing,
+    CrIs::Vector{Float64}=[0.2, 0.5, 0.9]
+)
+    if type == :snapshot
+        date = isnothing(target_date) ? result.observations.date[end] :
+            target_date
+        _snapshot_summary(result, date, CrIs)
+    elseif type == :parameters
+        _parameter_summary(result, CrIs)
+    end
+end
+
+function Base.summary(result::EpinowResult; kwargs...)
+    summary(result.estimates; kwargs...)
+end
+
+# ── Internal: build result from generated quantities ─────────────────────
+
+function build_result(fit::EpiNow2Fit, data::EpiData, elapsed::Float64)
+    CrIs = [0.2, 0.5, 0.9]
+    dates = _output_dates(fit.metadata)
+
+    infections = _summarise_gq(fit, :infections, dates, CrIs)
+    reports = _summarise_gq(fit, :reports, dates, CrIs)
+    rt_df = _summarise_gq(fit, :R, dates, CrIs)
+
+    # Growth rate: log-diff of infections
+    growth = _compute_growth_rate(fit, dates, CrIs)
+
+    EstimateInfectionsResult(
+        fit, data, infections, reports, rt_df, growth, elapsed
+    )
+end
+
+function _output_dates(meta::ModelMetadata)
+    n_obs = length(meta.dates)
+    last_date = meta.dates[end]
+    forecast_dates = [last_date + Day(i) for i in 1:meta.horizon]
+    vcat(meta.dates, forecast_dates)
+end
+
+"""
+Extract a named field from generated quantities across all samples,
+compute summary statistics.
+"""
+function _summarise_gq(
+    fit::EpiNow2Fit, field::Symbol,
+    dates::Vector{Date}, CrIs::Vector{Float64}
+)
+    gqs = fit.generated_quantities
+    n_samples = length(gqs)
+
+    # Not all GQs may have the field (model variants)
+    hasfield_check = haskey(first(gqs), field)
+    !hasfield_check && return DataFrame()
+
+    n_times = length(first(gqs)[field])
+    n_dates = min(n_times, length(dates))
+
+    # Collect samples into matrix (n_dates × n_samples)
+    mat = Matrix{Float64}(undef, n_dates, n_samples)
+    for (i, gq) in enumerate(gqs)
+        vals = gq[field]
+        for t in 1:n_dates
+            mat[t, i] = Float64(vals[t])
+        end
+    end
+
+    _matrix_to_summary(mat, dates[1:n_dates], CrIs)
+end
+
+function _matrix_to_summary(
+    mat::Matrix{Float64}, dates::Vector{Date}, CrIs::Vector{Float64}
+)
+    n = size(mat, 1)
+    rows = Vector{NamedTuple}(undef, n)
+
+    for t in 1:n
+        vals = mat[t, :]
+        row = (
+            date = dates[t],
+            mean = mean(vals),
+            median = median(vals),
+            sd = std(vals)
+        )
+
+        # Add CrI columns
+        for cri in CrIs
+            lo = quantile(vals, (1 - cri) / 2)
+            hi = quantile(vals, (1 + cri) / 2)
+            pct = round(Int, cri * 100)
+            row = merge(row, NamedTuple{(
+                Symbol("lower_$pct"), Symbol("upper_$pct")
+            )}((lo, hi)))
+        end
+
+        rows[t] = row
+    end
+
+    DataFrame(rows)
+end
+
+function _compute_growth_rate(
+    fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}
+)
+    gqs = fit.generated_quantities
+    n_samples = length(gqs)
+
+    !haskey(first(gqs), :infections) && return DataFrame()
+
+    n_times = length(first(gqs)[:infections])
+    n_dates = min(n_times, length(dates))
+    n_growth = n_dates - 1
+
+    mat = Matrix{Float64}(undef, n_growth, n_samples)
+    for (i, gq) in enumerate(gqs)
+        inf = gq[:infections]
+        for t in 1:n_growth
+            mat[t, i] = log(Float64(inf[t + 1])) - log(Float64(inf[t]))
+        end
+    end
+
+    _matrix_to_summary(mat, dates[2:n_dates], CrIs)
+end
+
+function _samples_to_quantiles(samples::DataFrame, CrIs::Vector{Float64})
+    # Group by date, compute quantiles
+    # TODO: implement with DataFrames groupby
+    DataFrame()
+end
+
+function _snapshot_summary(result, date, CrIs)
+    # Filter summaries to target date
+    rows = []
+    for (name, df) in [
+        (:infections, result.infections),
+        (:rt, result.rt),
+        (:growth_rate, result.growth_rate),
+        (:reports, result.reports)
+    ]
+        isempty(df) && continue
+        row = filter(r -> r.date == date, df)
+        if !isempty(row)
+            r = first(eachrow(row))
+            push!(rows, merge((variable=name,), NamedTuple(r)))
+        end
+    end
+    DataFrame(rows)
+end
+
+function _parameter_summary(result, CrIs)
+    vcat(
+        insertcols!(copy(result.infections), 1, :variable => :infections),
+        insertcols!(copy(result.rt), 1, :variable => :rt),
+        insertcols!(copy(result.growth_rate), 1, :variable => :growth_rate),
+        insertcols!(copy(result.reports), 1, :variable => :reports);
+        cols=:union
+    )
+end
