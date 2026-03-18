@@ -67,7 +67,72 @@ struct CompositeDelay
     components::Vector{DelayDistribution}
 end
 
-# ── Show methods ─────────────────────────────────────────────────────────
+# ── Show methods (matching R's tree format) ──────────────────────────────
+
+function _dist_family(d::Distribution)
+    d isa LogNormal && return "lognormal"
+    d isa Gamma && return "gamma"
+    d isa Normal && return "normal"
+    d isa Dirac && return "fixed"
+    d isa Truncated && return _dist_family(d.untruncated)
+    lowercase(string(typeof(d).name.name))
+end
+
+function _dist_name(d::Distribution)
+    replace(string(typeof(d).name.name), r"\{.*\}" => "")
+end
+
+function _param_names(d::Distribution)
+    d isa LogNormal && return ["meanlog", "sdlog"]
+    d isa Gamma && return ["shape", "rate"]
+    d isa Normal && return ["mean", "sd"]
+    ["param_$i" for i in 1:length(params(d))]
+end
+
+function _param_values(d::Distribution)
+    d isa LogNormal && return [d.μ, d.σ]
+    d isa Gamma && return [shape(d), 1 / scale(d)]
+    d isa Normal && return [d.μ, d.σ]
+    collect(params(d))
+end
+
+"""Print a delay distribution in R's indented tree format."""
+function _show_tree(io::IO, d::Distribution; indent=0)
+    prefix = "  " ^ indent
+    if d isa Dirac
+        println(io, "$(prefix)- fixed (value: $(d.value))")
+    elseif d isa Truncated
+        _show_tree(io, d.untruncated; indent=indent)
+    else
+        println(io, "$(prefix)- $(_dist_family(d)) distribution:")
+        for (name, val) in zip(_param_names(d), _param_values(d))
+            println(io, "$(prefix)  $(name):")
+            println(io, "$(prefix)    $(round(val, digits=4))")
+        end
+    end
+end
+
+function _show_tree(io::IO, d::UncertainDistribution; indent=0)
+    prefix = "  " ^ indent
+    mean_params = [mean(p) for p in d.param_priors]
+    example = d.constructor(mean_params...)
+
+    println(io, "$(prefix)- $(_dist_family(example)) distribution (max: $(Int(d.max))):")
+    for (name, prior) in zip(_param_names(example), d.param_priors)
+        println(io, "$(prefix)  $(name):")
+        prior_inner = prior isa Truncated ? prior.untruncated : prior
+        _show_tree(io, prior_inner; indent=indent + 2)
+    end
+end
+
+function _show_tree(io::IO, d::NonParametricDist; indent=0)
+    prefix = "  " ^ indent
+    n = length(d.pmf)
+    m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
+    println(io, "$(prefix)- non-parametric distribution (max: $(n - 1), mean: $(round(m, digits=2)))")
+end
+
+# ── Base.show for each type ──
 
 function Base.show(io::IO, d::NonParametricDist)
     n = length(d.pmf)
@@ -76,103 +141,29 @@ function Base.show(io::IO, d::NonParametricDist)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", d::NonParametricDist)
-    n = length(d.pmf)
-    m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
-    println(io, "Non-parametric distribution (max: $(n - 1), mean: $(round(m, digits=2)))")
-    # Show PMF as a sparkline-style bar
-    peak = maximum(d.pmf)
-    for i in 1:min(n, 20)
-        bar = repeat("█", round(Int, d.pmf[i] / peak * 15))
-        println(io, "  $(lpad(i - 1, 2)): $(rpad(bar, 15)) $(round(d.pmf[i], digits=4))")
-    end
-    n > 20 && println(io, "  ...")
-end
-
-function _dist_name(d::Distribution)
-    n = string(typeof(d).name.name)
-    # Strip type parameters
-    replace(n, r"\{.*\}" => "")
-end
-
-function _show_dist(io::IO, d::Distribution; indent=0)
-    prefix = "  " ^ indent
-    if d isa Dirac
-        println(io, "$(prefix)Fixed($(d.value))")
-    elseif d isa LogNormal
-        println(io, "$(prefix)LogNormal distribution:")
-        println(io, "$(prefix)  meanlog: $(round(d.μ, digits=4))")
-        println(io, "$(prefix)  sdlog: $(round(d.σ, digits=4))")
-    elseif d isa Gamma
-        println(io, "$(prefix)Gamma distribution:")
-        println(io, "$(prefix)  shape: $(round(shape(d), digits=4))")
-        println(io, "$(prefix)  rate: $(round(1/scale(d), digits=4))")
-    elseif d isa Truncated
-        _show_dist(io, d.untruncated; indent=indent)
-        lo = (d.lower isa Number && d.lower != -Inf) ? "lower=$(round(d.lower, digits=4))" : ""
-        hi = (d.upper isa Number && d.upper != Inf) ? "upper=$(round(d.upper, digits=4))" : ""
-        bounds = join(filter(!isempty, [lo, hi]), ", ")
-        !isempty(bounds) && println(io, "$(prefix)  truncated: $bounds")
-    elseif d isa Normal
-        println(io, "$(prefix)Normal(mean=$(round(d.μ, digits=4)), sd=$(round(d.σ, digits=4)))")
-    else
-        println(io, "$(prefix)$(_dist_name(d))($(params(d)))")
-    end
-end
-
-function Base.show(io::IO, ::MIME"text/plain", d::UncertainDistribution)
-    # Infer distribution family from constructor at prior means
-    mean_params = [mean(p) for p in d.param_priors]
-    example = d.constructor(mean_params...)
-    family = _dist_name(example)
-    println(io, "$family distribution (max: $(Int(d.max))):")
-    param_names = if example isa LogNormal
-        ["meanlog", "sdlog"]
-    elseif example isa Gamma
-        ["shape", "rate"]
-    else
-        ["param_$i" for i in 1:length(d.param_priors)]
-    end
-    for (name, prior) in zip(param_names, d.param_priors)
-        println(io, "  $name:")
-        _show_dist(io, prior; indent=2)
-    end
+    _show_tree(io, d)
 end
 
 function Base.show(io::IO, d::UncertainDistribution)
     mean_params = [mean(p) for p in d.param_priors]
     example = d.constructor(mean_params...)
-    print(io, "Uncertain $(_dist_name(example))(max=$(Int(d.max)))")
+    print(io, "Uncertain $(_dist_family(example))(max=$(Int(d.max)))")
 end
 
-function Base.show(io::IO, ::MIME"text/plain", d::CompositeDelay)
-    println(io, "Composite distribution:")
-    for (i, c) in enumerate(d.components)
-        println(io, "  [$i]")
-        _show_delay(io, c; indent=2)
-    end
-end
-
-function _show_delay(io::IO, d::Distribution; indent=0)
-    _show_dist(io, d; indent=indent)
-end
-
-function _show_delay(io::IO, d::NonParametricDist; indent=0)
-    prefix = "  " ^ indent
-    n = length(d.pmf)
-    m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
-    println(io, "$(prefix)Non-parametric (max: $(n - 1), mean: $(round(m, digits=2)))")
-end
-
-function _show_delay(io::IO, d::UncertainDistribution; indent=0)
-    prefix = "  " ^ indent
-    mean_params = [mean(p) for p in d.param_priors]
-    example = d.constructor(mean_params...)
-    println(io, "$(prefix)Uncertain $(_dist_name(example)) (max: $(Int(d.max)))")
+function Base.show(io::IO, ::MIME"text/plain", d::UncertainDistribution)
+    _show_tree(io, d)
 end
 
 function Base.show(io::IO, d::CompositeDelay)
     parts = [sprint(show, c) for c in d.components]
     print(io, join(parts, " + "))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", d::CompositeDelay)
+    println(io, "Composite distribution:")
+    for c in d.components
+        _show_tree(io, c; indent=0)
+    end
 end
 
 # ── Operators ────────────────────────────────────────────────────────────

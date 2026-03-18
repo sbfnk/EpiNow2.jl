@@ -159,41 +159,29 @@ secondary_opts(; kwargs...) = SecondaryOpts(; kwargs...)
 
 function Base.show(io::IO, ::MIME"text/plain", o::GTOpts)
     println(io, "Generation time options:")
-    print(io, "  dist: ")
-    show(io, MIME("text/plain"), o.dist)
+    _show_tree(io, o.dist; indent=1)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::DelayOpts)
     println(io, "Delay options:")
-    print(io, "  dist: ")
-    show(io, MIME("text/plain"), o.dist)
+    _show_tree(io, o.dist; indent=1)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::TruncOpts)
     println(io, "Truncation options:")
-    print(io, "  dist: ")
-    show(io, MIME("text/plain"), o.dist)
+    _show_tree(io, o.dist; indent=1)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::RtOpts)
-    println(io, "Rt options:")
     m = round(mean(o.prior), digits=2)
     s = round(std(o.prior), digits=2)
-    println(io, "  prior: $(_dist_name(o.prior))(mean=$m, sd=$s)")
+    println(io, "Rt options:")
+    println(io, "  prior: $(_dist_family(o.prior))(mean=$m, sd=$s)")
     println(io, "  use_rt: $(o.use_rt)")
     o.rw > 0 && println(io, "  random walk period: $(o.rw)")
     println(io, "  gp_on: $(o.gp_on)")
     println(io, "  future: $(o.future)")
     o.pop > 0 && println(io, "  population: $(o.pop)")
-end
-
-function Base.show(io::IO, ::MIME"text/plain", o::GPOpts)
-    println(io, "Gaussian process options:")
-    println(io, "  kernel: $(o.kernel) (order $(o.matern_order))")
-    println(io, "  basis_prop: $(o.basis_prop)")
-    println(io, "  boundary_scale: $(o.boundary_scale)")
-    println(io, "  alpha prior: $(o.alpha)")
-    println(io, "  length scale prior: $(o.ls)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::ObsOpts)
@@ -206,8 +194,5 @@ end
 function Base.show(io::IO, ::MIME"text/plain", o::InferenceOpts)
     println(io, "Inference options:")
     println(io, "  sampler: $(o.sampler)")
-    println(io, "  samples: $(o.samples)")
-    println(io, "  warmup: $(o.warmup)")
-    println(io, "  chains: $(o.chains)")
-    println(io, "  target_acceptance: $(o.target_acceptance)")
+    println(io, "  samples: $(o.samples), warmup: $(o.warmup), chains: $(o.chains)")
 end

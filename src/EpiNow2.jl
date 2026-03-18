@@ -21,6 +21,7 @@ plot(result)
 """
 module EpiNow2
 
+using CairoMakie
 using CensoredDistributions
 using Dates
 using DataFrames
@@ -46,6 +47,10 @@ export epinow, estimate_infections, estimate_secondary,
 
 # ── Accessors ───────────────────────────────────────────────────────────
 export get_samples, get_predictions, get_parameters
+
+# ── Re-export Makie functions so plotting works without extra imports ───
+using CairoMakie: save as save_figure
+export plot, save_figure
 
 include("distributions.jl")
 include("options.jl")
