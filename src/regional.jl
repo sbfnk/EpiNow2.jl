@@ -26,12 +26,8 @@ data = DataFrame(
 
 result = regional_epinow(
     data,
-    generation_time = gt_opts(
-        LogNormalSpec(meanlog=1.6, sdlog=0.5, max=14)
-    ),
-    delays = delay_opts(
-        LogNormalSpec(meanlog=0.5, sdlog=0.5, max=14)
-    )
+    generation_time = gt_opts(LogNormal(1.6, 0.5)),
+    delays = delay_opts(LogNormal(0.5, 0.5))
 )
 
 # Cross-region summary

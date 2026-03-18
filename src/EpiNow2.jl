@@ -12,8 +12,8 @@ using EpiNow2
 
 result = epinow(
     data,
-    generation_time = gt_opts(LogNormalSpec(meanlog=1.6, sdlog=0.5, max=14)),
-    delays = delay_opts(LogNormalSpec(meanlog=0.5, sdlog=0.5, max=14))
+    generation_time = gt_opts(LogNormal(1.6, 0.5)),
+    delays = delay_opts(LogNormal(0.5, 0.5))
 )
 summary(result)
 plot(result)
@@ -21,18 +21,20 @@ plot(result)
 """
 module EpiNow2
 
+using CensoredDistributions
 using Dates
 using DataFrames
 using Distributions
 using LinearAlgebra
 using MCMCChains
-using SpecialFunctions: gamma
+using SpecialFunctions: loggamma
+using Statistics
 using Turing
 
-# ── Distribution specification ──────────────────────────────────────────
-export DistSpec, LogNormalSpec, GammaSpec, NormalSpec, FixedSpec,
-       NonParametricSpec
-export discretise
+# ── Distribution system ────────────────────────────────────────────────
+export NonParametricDist, UncertainDistribution, DelayDistribution,
+       CompositeDelay
+export discretise, convolve_pmfs
 
 # ── Options ─────────────────────────────────────────────────────────────
 export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
@@ -40,7 +42,7 @@ export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
 
 # ── Main inference functions ────────────────────────────────────────────
 export epinow, estimate_infections, estimate_secondary,
-       estimate_truncation, regional_epinow
+       estimate_truncation, regional_epinow, example_confirmed
 
 # ── Accessors ───────────────────────────────────────────────────────────
 export get_samples, get_predictions, get_parameters

@@ -29,6 +29,38 @@ struct EpinowResult
     timing::Float64
 end
 
+# ── Show methods ──────────────────────────────────────────────────────────
+
+function _latest_estimate(df::DataFrame)
+    isempty(df) && return ""
+    r = df[end, :]
+    "$(round(r.median, digits=2)) (90% CrI: $(round(r.lower_90, digits=2))-$(round(r.upper_90, digits=2)))"
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::EstimateInfectionsResult)
+    n_obs = length(r.observations)
+    d1 = r.observations.date[1]
+    d_end = r.observations.date[end]
+    n_forecast = nrow(r.rt) - n_obs
+    println(io, "EpiNow2 estimate_infections result")
+    println(io, "  Data: $n_obs days ($d1 to $d_end)")
+    n_forecast > 0 && println(io, "  Forecast: $n_forecast days")
+    println(io, "  Timing: $(round(r.timing, digits=1))s")
+    println(io)
+    println(io, "  Latest Rt: $(_latest_estimate(r.rt))")
+    println(io, "  Latest infections: $(_latest_estimate(r.infections))")
+    println(io, "  Latest reports: $(_latest_estimate(r.reports))")
+end
+
+function Base.show(io::IO, r::EstimateInfectionsResult)
+    print(io, "EstimateInfectionsResult($(length(r.observations)) obs, " *
+          "Rt=$(_latest_estimate(r.rt)))")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::EpinowResult)
+    show(io, MIME("text/plain"), r.estimates)
+end
+
 # ── Accessors ────────────────────────────────────────────────────────────
 
 """
@@ -160,8 +192,7 @@ function _summarise_gq(
     n_samples = length(gqs)
 
     # Not all GQs may have the field (model variants)
-    hasfield_check = haskey(first(gqs), field)
-    !hasfield_check && return DataFrame()
+    haskey(first(gqs), field) || return DataFrame()
 
     n_times = length(first(gqs)[field])
     n_dates = min(n_times, length(dates))
@@ -233,7 +264,6 @@ function _compute_growth_rate(
 end
 
 function _samples_to_quantiles(samples::DataFrame, CrIs::Vector{Float64})
-    # Group by date, compute quantiles
     # TODO: implement with DataFrames groupby
     DataFrame()
 end

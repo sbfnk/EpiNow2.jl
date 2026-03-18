@@ -1,13 +1,13 @@
-[project]
 name = "EpiNow2"
-uuid = "00000000-0000-0000-0000-000000000000"
+uuid = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
 version = "0.1.0"
 
 [deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CensoredDistributions = "b2eeebe4-5992-4301-9193-7ebc9f62c855"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MCMCChains = "c7f686f2-ff18-58e9-bc7b-31028e88f75d"
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
@@ -16,4 +16,14 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
 
 [compat]
+CSV = "0.10.16"
+CensoredDistributions = "0.2.0"
+SpecialFunctions = "2.7.1"
 julia = "1.10"
+
+[extras]
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Random", "Test"]

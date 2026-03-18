@@ -26,24 +26,14 @@ data = DataFrame(
 
 result = estimate_secondary(
     data,
-    delays = delay_opts(
-        LogNormalSpec(meanlog=NormalSpec(mean=2.5, sd=0.5),
-                     sdlog=NormalSpec(mean=0.47, sd=0.25),
-                     max=30)
-    )
+    delays = delay_opts(LogNormal(2.5, 0.47))
 )
 ```
 """
 function estimate_secondary(
     data::DataFrame;
     secondary::SecondaryOpts = secondary_opts(),
-    delays::DelayOpts = delay_opts(
-        LogNormalSpec(
-            meanlog=NormalSpec(mean=2.5, sd=0.5),
-            sdlog=NormalSpec(mean=0.47, sd=0.25),
-            max=30
-        )
-    ),
+    delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
     truncation::TruncOpts = trunc_opts(),
     obs::ObsOpts = obs_opts(),
     inference::InferenceOpts = inference_opts(),

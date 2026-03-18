@@ -1,0 +1,215 @@
+---
+title: "Workflow for Rt estimation and forecasting"
+engine: julia
+---
+
+This vignette demonstrates the typical workflow for estimating reproduction
+numbers and performing short-term forecasts using EpiNow2.jl. It mirrors
+the [R EpiNow2 workflow vignette](https://epiforecasts.io/EpiNow2/articles/estimate_infections_workflow.html).
+
+## Setup
+
+```{julia}
+using EpiNow2
+using CSV
+using DataFrames
+using Dates
+using Distributions
+using Statistics
+```
+
+## Data
+
+EpiNow2 expects a `DataFrame` with columns `:date` and `:confirm`
+(representing reported counts). Here we use the example data from R's
+EpiNow2 package (UK COVID-19 cases, Feb--Jun 2020).
+
+```{julia}
+reported_cases = CSV.read(
+    joinpath(@__DIR__, "..", "test", "reference", "example_confirmed_full.csv"),
+    DataFrame
+)
+reported_cases.date = Date.(reported_cases.date)
+reported_cases = first(reported_cases, 30)
+first(reported_cases, 6)
+```
+
+## Parameters
+
+### Delay distributions
+
+EpiNow2 uses delay distributions to model the time between events in the
+infection-to-observation pipeline. Distributions can be **fixed** (known
+parameters) or **uncertain** (priors on parameters, estimated jointly with
+Rt).
+
+A fixed Gamma distribution:
+
+```{julia}
+fixed_gamma = Gamma(9.0, 1/3)
+discretise(fixed_gamma; max=10)
+```
+
+An uncertain Gamma distribution (with priors on shape and rate):
+
+```{julia}
+uncertain_gamma = UncertainDistribution(
+    (shape, rate) -> Gamma(shape, 1 / rate),
+    [Normal(3.0, 2.0), truncated(Normal(1.0, 0.1); lower=0.01)],
+    10.0
+)
+```
+
+### Generation time
+
+The generation time is the delay between infection of a primary case and
+infection of a secondary case. We use an uncertain Gamma distribution
+matching R's `example_generation_time`.
+
+```{julia}
+generation_time = UncertainDistribution(
+    (shape, rate) -> Gamma(shape, 1 / rate),
+    [truncated(Normal(1.4, 0.48); lower=0.01),
+     truncated(Normal(0.38, 0.25); lower=0.01)],
+    14.0
+)
+gt_opts(generation_time)
+```
+
+### Reporting delays
+
+Reproduction numbers are estimated from infection incidence, which isn't
+directly observed. We must account for delays from infection to symptom
+onset (incubation period) and from symptom onset to report (reporting
+delay). Multiple delays are composed with `+`.
+
+```{julia}
+incubation_period = UncertainDistribution(
+    (μ, σ) -> LogNormal(μ, σ),
+    [Normal(1.62, 0.064), truncated(Normal(0.418, 0.069); lower=0.01)],
+    14.0
+)
+
+reporting_delay = LogNormal(0.5, 0.5)
+
+delay = discretise(incubation_period) + discretise(reporting_delay; max=10)
+delay_opts(delay)
+```
+
+### Truncation
+
+Recent data may be incomplete due to reporting delays (right-truncation).
+Truncation can be adjusted for by specifying a truncation distribution via
+`trunc_opts()`.
+
+```{julia}
+trunc_opts(LogNormal(0.5, 0.5))
+```
+
+### Completeness of reporting
+
+Not all infections become reported cases. Under-reporting is specified via
+the `scale` argument in `obs_opts()`, using a prior on the fraction
+observed.
+
+```{julia}
+obs_scale = truncated(Normal(0.4, 0.01); lower=0.0, upper=1.0)
+obs_opts(scale=obs_scale)
+```
+
+### Initial reproduction number
+
+The model requires a prior on the initial reproduction number. The default
+is `LogNormal(mean=1, sd=1)`.
+
+```{julia}
+rt_prior = LogNormal(log(2) - 0.5 * log(1 + (1/2)^2), sqrt(log(1 + (1/2)^2)))
+rt_opts(prior=rt_prior)
+```
+
+## Estimation and forecasting
+
+We combine all options in a call to `estimate_infections()`. For speed we
+use the first 60 days, 2 chains, and 1000 post-warmup samples.
+
+```{julia}
+#| output: false
+result = estimate_infections(
+    reported_cases;
+    generation_time = gt_opts(generation_time),
+    delays = delay_opts(delay),
+    rt = rt_opts(prior = rt_prior),
+    forecast = forecast_opts(horizon=7),
+    inference = inference_opts(
+        samples=1000,
+        warmup=250,
+        chains=2
+    )
+)
+```
+
+The result summary:
+
+```{julia}
+result
+```
+
+## Interpretation
+
+### Reproduction number
+
+The estimated time-varying reproduction number:
+
+```{julia}
+result.rt[!, [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]]
+```
+
+### Estimated infections
+
+The latent infection trajectory (by date of infection):
+
+```{julia}
+result.infections[!, [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]]
+```
+
+### Reported cases and forecasts
+
+Expected reported cases, including the 7-day forecast period beyond the
+data:
+
+```{julia}
+result.reports[!, [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]]
+```
+
+### Fitted parameters
+
+Scalar parameters from the posterior:
+
+```{julia}
+params = get_parameters(result)
+param_summary = DataFrame(
+    parameter = Symbol[],
+    median = Float64[],
+    lower_90 = Float64[],
+    upper_90 = Float64[]
+)
+for (k, v) in sort(collect(params), by=first)
+    any(ismissing, v) && continue
+    push!(param_summary, (
+        parameter=k,
+        median=round(median(v), digits=4),
+        lower_90=round(quantile(v, 0.05), digits=4),
+        upper_90=round(quantile(v, 0.95), digits=4)
+    ))
+end
+param_summary
+```
+
+### Raw posterior samples
+
+For custom analyses, extract posterior samples directly:
+
+```{julia}
+samples = get_samples(result; variable=:R)
+nrow(samples)
+```

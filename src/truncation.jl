@@ -22,13 +22,7 @@ snapshots = [early_data, mid_data, late_data]
 
 trunc = estimate_truncation(
     snapshots,
-    truncation = trunc_opts(
-        LogNormalSpec(
-            meanlog=NormalSpec(mean=0.0, sd=1.0),
-            sdlog=NormalSpec(mean=1.0, sd=1.0),
-            max=10
-        )
-    )
+    truncation = trunc_opts(LogNormal(0.0, 1.0))
 )
 
 # Use fitted truncation in main estimation
@@ -37,13 +31,7 @@ result = epinow(data, truncation=trunc_opts(trunc.dist), ...)
 """
 function estimate_truncation(
     data::Vector{DataFrame};
-    truncation::TruncOpts = trunc_opts(
-        LogNormalSpec(
-            meanlog=NormalSpec(mean=0.0, sd=1.0),
-            sdlog=NormalSpec(mean=1.0, sd=1.0),
-            max=10
-        )
-    ),
+    truncation::TruncOpts = trunc_opts(LogNormal(0.0, 1.0)),
     inference::InferenceOpts = inference_opts(),
     CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
     verbose::Bool = true
@@ -58,7 +46,7 @@ end
 
 struct EstimateTruncationResult
     fit::EpiNow2Fit
-    dist::DistSpec  # fitted truncation distribution
+    dist::DelayDistribution  # fitted truncation distribution
     observations::Vector{EpiData}
     timing::Float64
 end

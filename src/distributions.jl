@@ -1,220 +1,318 @@
-# ── Distribution specification system ────────────────────────────────────
+# ── Distribution system ───────────────────────────────────────────────────
 #
-# Maps EpiNow2's dist_spec to Julia types. These are *specifications* that
-# describe a distribution (possibly with uncertain parameters), not
-# Distributions.jl objects directly. They get converted to EpiAware
-# components at model-assembly time.
+# Uses Distributions.jl directly for fixed delay distributions.
+# Only adds thin wrappers for PMF vectors and uncertain parameters.
 
 """
-    DistSpec
-
-Abstract type for all distribution specifications. A DistSpec describes a
-delay distribution that may have uncertain parameters (priors on parameters).
-"""
-abstract type DistSpec end
-
-"""
-    LogNormalSpec(; meanlog, sdlog, mean, sd, max, cdf_cutoff)
-
-Log-normal distribution specification. Provide either natural parameters
-(`meanlog`, `sdlog`) or moment parameters (`mean`, `sd`).
-
-Parameters can be:
-- A number (fixed)
-- A `NormalSpec` (uncertain, with prior)
-
-# Examples
-```julia
-# Fixed parameters
-LogNormalSpec(meanlog=1.6, sdlog=0.5, max=14)
-
-# Uncertain parameters (priors on delay distribution params)
-LogNormalSpec(
-    meanlog=NormalSpec(mean=1.6, sd=0.2),
-    sdlog=NormalSpec(mean=0.5, sd=0.1),
-    max=14
-)
-
-# Moment parameterisation
-LogNormalSpec(mean=5.0, sd=3.0, max=14)
-```
-"""
-struct LogNormalSpec <: DistSpec
-    meanlog::Union{Float64, NormalSpec}
-    sdlog::Union{Float64, NormalSpec}
-    max::Float64
-    cdf_cutoff::Float64
-
-    function LogNormalSpec(;
-        meanlog=nothing, sdlog=nothing,
-        mean=nothing, sd=nothing,
-        max=Inf, cdf_cutoff=0.0
-    )
-        if !isnothing(meanlog) && !isnothing(sdlog)
-            new(meanlog, sdlog, Float64(max), Float64(cdf_cutoff))
-        elseif !isnothing(mean) && !isnothing(sd)
-            # Convert moments to natural parameters
-            μ, σ = _moments_to_lognormal(Float64(mean), Float64(sd))
-            new(μ, σ, Float64(max), Float64(cdf_cutoff))
-        else
-            throw(ArgumentError(
-                "Provide either (meanlog, sdlog) or (mean, sd)"
-            ))
-        end
-    end
-end
-
-"""
-    GammaSpec(; shape, rate, scale, mean, sd, max, cdf_cutoff)
-
-Gamma distribution specification.
-"""
-struct GammaSpec <: DistSpec
-    shape::Union{Float64, NormalSpec}
-    rate::Union{Float64, NormalSpec}
-    max::Float64
-    cdf_cutoff::Float64
-
-    function GammaSpec(;
-        shape=nothing, rate=nothing, scale=nothing,
-        mean=nothing, sd=nothing,
-        max=Inf, cdf_cutoff=0.0
-    )
-        if !isnothing(shape) && (!isnothing(rate) || !isnothing(scale))
-            r = isnothing(rate) ? 1.0 / Float64(scale) : Float64(rate)
-            new(shape, r, Float64(max), Float64(cdf_cutoff))
-        elseif !isnothing(mean) && !isnothing(sd)
-            s, r = _moments_to_gamma(Float64(mean), Float64(sd))
-            new(s, r, Float64(max), Float64(cdf_cutoff))
-        else
-            throw(ArgumentError(
-                "Provide either (shape, rate/scale) or (mean, sd)"
-            ))
-        end
-    end
-end
-
-"""
-    NormalSpec(; mean, sd)
-
-Normal distribution specification. Used both as a standalone distribution
-and as a prior on parameters of other distributions.
-"""
-struct NormalSpec <: DistSpec
-    mean::Float64
-    sd::Float64
-    max::Float64
-    cdf_cutoff::Float64
-
-    function NormalSpec(; mean, sd, max=Inf, cdf_cutoff=0.0)
-        new(Float64(mean), Float64(sd), Float64(max), Float64(cdf_cutoff))
-    end
-end
-
-"""
-    FixedSpec(value)
-
-Point mass (delta) distribution at `value`.
-"""
-struct FixedSpec <: DistSpec
-    value::Float64
-end
-
-"""
-    NonParametricSpec(pmf)
+    NonParametricDist(pmf)
 
 Non-parametric distribution specified as a probability mass function.
 `pmf[1]` is the probability of delay 0, `pmf[2]` of delay 1, etc.
+
+Supports `+` for convolution:
+```julia
+discretise(LogNormal(1.6, 0.5); max=14) + discretise(LogNormal(0.5, 0.3); max=7)
+```
 """
-struct NonParametricSpec <: DistSpec
+struct NonParametricDist
     pmf::Vector{Float64}
 
-    function NonParametricSpec(pmf::Vector{Float64})
-        @assert sum(pmf) ≈ 1.0 "PMF must sum to 1"
-        @assert all(pmf .>= 0) "PMF values must be non-negative"
-        new(pmf)
+    function NonParametricDist(pmf::AbstractVector{<:Real})
+        p = Vector{Float64}(pmf)
+        @assert sum(p) ≈ 1.0 "PMF must sum to 1"
+        @assert all(p .>= 0) "PMF values must be non-negative"
+        new(p)
     end
 end
 
 """
-    CompositeDistSpec(components)
+    UncertainDistribution
 
-Multiple distributions to be convolved (e.g., incubation + reporting delay).
-Created via `+` operator on DistSpec objects.
+A delay distribution with priors on its parameters. Used when the delay
+distribution itself is uncertain and parameters should be estimated.
+
+# Examples
+```julia
+# Uncertain log-normal delay
+UncertainDistribution(
+    (μ, σ) -> LogNormal(μ, σ),
+    [Normal(1.6, 0.2), truncated(Normal(0.5, 0.1); lower=0.0)],
+    14.0
+)
+```
 """
-struct CompositeDistSpec <: DistSpec
-    components::Vector{DistSpec}
+struct UncertainDistribution
+    constructor::Function
+    param_priors::Vector{<:Distribution}
+    max::Float64
+end
+
+"""
+    DelayDistribution
+
+Union type for all delay distribution specifications:
+- `Distribution` — a fixed Distributions.jl distribution
+- `NonParametricDist` — a discretised PMF
+- `UncertainDistribution` — distribution with priors on parameters
+"""
+const DelayDistribution = Union{Distribution, NonParametricDist, UncertainDistribution}
+
+"""
+    CompositeDelay
+
+Multiple delay distributions to be convolved sequentially
+(e.g., incubation period + reporting delay).
+"""
+struct CompositeDelay
+    components::Vector{DelayDistribution}
+end
+
+# ── Show methods ─────────────────────────────────────────────────────────
+
+function Base.show(io::IO, d::NonParametricDist)
+    n = length(d.pmf)
+    m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
+    print(io, "NonParametricDist(max=$(n - 1), mean=$(round(m, digits=2)))")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", d::NonParametricDist)
+    n = length(d.pmf)
+    m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
+    println(io, "Non-parametric distribution (max: $(n - 1), mean: $(round(m, digits=2)))")
+    # Show PMF as a sparkline-style bar
+    peak = maximum(d.pmf)
+    for i in 1:min(n, 20)
+        bar = repeat("█", round(Int, d.pmf[i] / peak * 15))
+        println(io, "  $(lpad(i - 1, 2)): $(rpad(bar, 15)) $(round(d.pmf[i], digits=4))")
+    end
+    n > 20 && println(io, "  ...")
+end
+
+function _dist_name(d::Distribution)
+    n = string(typeof(d).name.name)
+    # Strip type parameters
+    replace(n, r"\{.*\}" => "")
+end
+
+function _show_dist(io::IO, d::Distribution; indent=0)
+    prefix = "  " ^ indent
+    if d isa Dirac
+        println(io, "$(prefix)Fixed($(d.value))")
+    elseif d isa LogNormal
+        println(io, "$(prefix)LogNormal distribution:")
+        println(io, "$(prefix)  meanlog: $(round(d.μ, digits=4))")
+        println(io, "$(prefix)  sdlog: $(round(d.σ, digits=4))")
+    elseif d isa Gamma
+        println(io, "$(prefix)Gamma distribution:")
+        println(io, "$(prefix)  shape: $(round(shape(d), digits=4))")
+        println(io, "$(prefix)  rate: $(round(1/scale(d), digits=4))")
+    elseif d isa Truncated
+        _show_dist(io, d.untruncated; indent=indent)
+        lo = (d.lower isa Number && d.lower != -Inf) ? "lower=$(round(d.lower, digits=4))" : ""
+        hi = (d.upper isa Number && d.upper != Inf) ? "upper=$(round(d.upper, digits=4))" : ""
+        bounds = join(filter(!isempty, [lo, hi]), ", ")
+        !isempty(bounds) && println(io, "$(prefix)  truncated: $bounds")
+    elseif d isa Normal
+        println(io, "$(prefix)Normal(mean=$(round(d.μ, digits=4)), sd=$(round(d.σ, digits=4)))")
+    else
+        println(io, "$(prefix)$(_dist_name(d))($(params(d)))")
+    end
+end
+
+function Base.show(io::IO, ::MIME"text/plain", d::UncertainDistribution)
+    # Infer distribution family from constructor at prior means
+    mean_params = [mean(p) for p in d.param_priors]
+    example = d.constructor(mean_params...)
+    family = _dist_name(example)
+    println(io, "$family distribution (max: $(Int(d.max))):")
+    param_names = if example isa LogNormal
+        ["meanlog", "sdlog"]
+    elseif example isa Gamma
+        ["shape", "rate"]
+    else
+        ["param_$i" for i in 1:length(d.param_priors)]
+    end
+    for (name, prior) in zip(param_names, d.param_priors)
+        println(io, "  $name:")
+        _show_dist(io, prior; indent=2)
+    end
+end
+
+function Base.show(io::IO, d::UncertainDistribution)
+    mean_params = [mean(p) for p in d.param_priors]
+    example = d.constructor(mean_params...)
+    print(io, "Uncertain $(_dist_name(example))(max=$(Int(d.max)))")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", d::CompositeDelay)
+    println(io, "Composite distribution:")
+    for (i, c) in enumerate(d.components)
+        println(io, "  [$i]")
+        _show_delay(io, c; indent=2)
+    end
+end
+
+function _show_delay(io::IO, d::Distribution; indent=0)
+    _show_dist(io, d; indent=indent)
+end
+
+function _show_delay(io::IO, d::NonParametricDist; indent=0)
+    prefix = "  " ^ indent
+    n = length(d.pmf)
+    m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
+    println(io, "$(prefix)Non-parametric (max: $(n - 1), mean: $(round(m, digits=2)))")
+end
+
+function _show_delay(io::IO, d::UncertainDistribution; indent=0)
+    prefix = "  " ^ indent
+    mean_params = [mean(p) for p in d.param_priors]
+    example = d.constructor(mean_params...)
+    println(io, "$(prefix)Uncertain $(_dist_name(example)) (max: $(Int(d.max)))")
+end
+
+function Base.show(io::IO, d::CompositeDelay)
+    parts = [sprint(show, c) for c in d.components]
+    print(io, join(parts, " + "))
 end
 
 # ── Operators ────────────────────────────────────────────────────────────
 
-Base.:+(a::DistSpec, b::DistSpec) = CompositeDistSpec([a, b])
-Base.:+(a::CompositeDistSpec, b::DistSpec) = CompositeDistSpec([a.components; b])
-Base.:+(a::DistSpec, b::CompositeDistSpec) = CompositeDistSpec([a; b.components])
-
-# ── Conversion to Distributions.jl ──────────────────────────────────────
-
-"""
-    to_distribution(spec::DistSpec) -> Distribution
-
-Convert a fixed DistSpec to a Distributions.jl distribution.
-Errors if parameters are uncertain (use `fix_parameters` first).
-"""
-function to_distribution(spec::LogNormalSpec)
-    spec.meanlog isa Float64 || error("Cannot convert uncertain dist")
-    spec.sdlog isa Float64 || error("Cannot convert uncertain dist")
-    Distributions.LogNormal(spec.meanlog, spec.sdlog)
+# NonParametricDist + NonParametricDist: convolve PMFs directly
+function Base.:+(a::NonParametricDist, b::NonParametricDist)
+    NonParametricDist(_convolve_pmfs(a.pmf, b.pmf))
 end
 
-function to_distribution(spec::GammaSpec)
-    spec.shape isa Float64 || error("Cannot convert uncertain dist")
-    spec.rate isa Float64 || error("Cannot convert uncertain dist")
-    Distributions.Gamma(spec.shape, 1.0 / spec.rate)
-end
+# General DelayDistribution composition
+Base.:+(a::DelayDistribution, b::DelayDistribution) =
+    CompositeDelay(DelayDistribution[a, b])
+Base.:+(a::CompositeDelay, b::DelayDistribution) =
+    CompositeDelay(DelayDistribution[a.components; b])
+Base.:+(a::DelayDistribution, b::CompositeDelay) =
+    CompositeDelay(DelayDistribution[a; b.components])
 
-function to_distribution(spec::NormalSpec)
-    Distributions.Normal(spec.mean, spec.sd)
-end
-
-"""
-    has_uncertain_params(spec::DistSpec) -> Bool
-
-Check whether a distribution specification has uncertain (prior) parameters.
-"""
-has_uncertain_params(::FixedSpec) = false
-has_uncertain_params(::NonParametricSpec) = false
-has_uncertain_params(spec::NormalSpec) = false
-function has_uncertain_params(spec::LogNormalSpec)
-    spec.meanlog isa NormalSpec || spec.sdlog isa NormalSpec
-end
-function has_uncertain_params(spec::GammaSpec)
-    spec.shape isa NormalSpec || spec.rate isa NormalSpec
-end
+# ── Discretisation ───────────────────────────────────────────────────────
 
 """
-    discretise(spec::DistSpec; remove_trailing_zeros=true) -> Vector{Float64}
+    discretise(d::Distribution; max=nothing, cdf_cutoff=0.001) -> NonParametricDist
 
-Discretise a distribution specification into a PMF vector.
-Only works for fixed-parameter distributions.
+Discretise a continuous distribution into a PMF using double interval
+censoring (matching R's `discretise()`). Returns a `NonParametricDist`
+that supports `+` for convolution.
+
+The PMF is 0-indexed: `pmf[1]` = P(delay=0), `pmf[2]` = P(delay=1), etc.
+
+# Examples
+```julia
+discretise(LogNormal(1.6, 0.5))              # auto max from cdf_cutoff
+discretise(LogNormal(1.6, 0.5); max=14)      # explicit max
+discretise(LogNormal(1.0, 0.5); max=14) +    # compose with +
+    discretise(LogNormal(0.5, 0.3); max=7)
+```
 """
-function discretise(spec::DistSpec; remove_trailing_zeros=true)
-    d = to_distribution(spec)
-    max_val = isfinite(spec.max) ? Int(spec.max) :
-        Int(ceil(quantile(d, 1.0 - spec.cdf_cutoff)))
+function discretise(
+    d::Distribution;
+    max::Union{Int, Nothing}=nothing,
+    cdf_cutoff::Float64=0.001
+)
+    max_val = if !isnothing(max)
+        max
+    else
+        Int(ceil(quantile(d, 1.0 - cdf_cutoff)))
+    end
 
-    pmf = [cdf(d, k + 0.5) - cdf(d, k - 0.5) for k in 0:max_val]
-    pmf ./= sum(pmf)
+    cd = double_interval_censored(d; interval=1, upper=max_val + 1)
+    pmf = [pdf(cd, k) for k in 0:max_val]
 
-    if remove_trailing_zeros
-        last_nonzero = findlast(x -> x > 1e-10, pmf)
+    # Remove trailing near-zeros
+    last_nonzero = findlast(x -> x > 1e-10, pmf)
+    if !isnothing(last_nonzero)
         pmf = pmf[1:last_nonzero]
     end
-    pmf
+
+    NonParametricDist(pmf)
 end
 
-discretise(spec::NonParametricSpec; kwargs...) = copy(spec.pmf)
-discretise(spec::FixedSpec; kwargs...) =
-    spec.value == 0 ? [1.0] : [zeros(Int(spec.value)); 1.0]
+"""
+    discretise(d::NonParametricDist) -> NonParametricDist
+
+Return a copy (already discretised).
+"""
+discretise(d::NonParametricDist; kwargs...) = NonParametricDist(copy(d.pmf))
+
+"""
+    discretise(d::UncertainDistribution; kwargs...) -> NonParametricDist
+
+Discretise at the prior mean parameter values.
+"""
+function discretise(d::UncertainDistribution; max::Union{Int, Nothing}=nothing, kwargs...)
+    mean_params = [mean(p) for p in d.param_priors]
+    max_val = isnothing(max) ? Int(d.max) : max
+    dist = d.constructor(mean_params...)
+    discretise(dist; max=max_val, kwargs...)
+end
+
+"""
+    discretise(d::Dirac) -> NonParametricDist
+
+Discretise a point mass distribution.
+"""
+function discretise(d::Dirac; kwargs...)
+    v = Int(d.value)
+    pmf = v == 0 ? [1.0] : [zeros(v); 1.0]
+    NonParametricDist(pmf)
+end
+
+"""
+    discretise(d::CompositeDelay; kwargs...) -> NonParametricDist
+
+Discretise a composite delay by convolving component PMFs.
+"""
+function discretise(d::CompositeDelay; kwargs...)
+    pmfs = [discretise(c; kwargs...).pmf for c in d.components]
+    NonParametricDist(reduce(_convolve_pmfs, pmfs))
+end
+
+# ── PMF convolution ──────────────────────────────────────────────────────
+
+"""
+    convolve_pmfs(a, b) -> NonParametricDist or Vector{Float64}
+
+Convolve two discretised distributions or raw PMF vectors.
+Equivalent to `a + b` for `NonParametricDist`.
+"""
+convolve_pmfs(a::NonParametricDist, b::NonParametricDist) = a + b
+convolve_pmfs(a::AbstractVector{Float64}, b::AbstractVector{Float64}) =
+    _convolve_pmfs(a, b)
+
+function _convolve_pmfs(a::AbstractVector{Float64}, b::AbstractVector{Float64})
+    na, nb = length(a), length(b)
+    n_out = na + nb - 1
+    out = zeros(Float64, n_out)
+    for i in 1:na, j in 1:nb
+        out[i + j - 1] += a[i] * b[j]
+    end
+    out
+end
+
+# ── AD-safe discretisation ───────────────────────────────────────────────
+
+"""
+    discretise_ad(d::Distribution, max_val::Int)
+
+Discretise a continuous distribution into a 1-indexed PMF
+(delay 1..max_val) using double interval censoring. AD-compatible
+for use inside Turing `@model` functions.
+
+Uses CensoredDistributions.jl which supports ForwardDiff through
+both LogNormal and Gamma distribution parameters.
+"""
+function discretise_ad(d::Distribution, max_val::Int)
+    cd = double_interval_censored(d; interval=1, upper=max_val + 1)
+    # 0-indexed PMF from CensoredDistributions, then drop delay 0
+    pmf_full = [exp(logpdf(cd, k)) for k in 0:max_val]
+    pmf = pmf_full[2:end]
+    pmf ./ sum(pmf)
+end
 
 # ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -222,10 +320,4 @@ function _moments_to_lognormal(mean, sd)
     σ² = log(1 + (sd / mean)^2)
     μ = log(mean) - σ² / 2
     (μ, sqrt(σ²))
-end
-
-function _moments_to_gamma(mean, sd)
-    shape = (mean / sd)^2
-    rate = mean / sd^2
-    (shape, rate)
 end

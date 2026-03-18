@@ -9,30 +9,38 @@
 Run Bayesian inference on the assembled Turing model.
 """
 function run_inference(model, metadata::ModelMetadata, opts::InferenceOpts)
-    sampler = _make_sampler(opts)
-
-    chain = if opts.sampler == :nuts
-        Turing.sample(
-            model,
-            sampler,
-            MCMCThreads(),
-            opts.samples,
-            opts.chains;
-            discard_initial=opts.warmup,
-            progress=opts.progress
-        )
-    elseif opts.sampler == :advi
-        q = Turing.vi(model, sampler)
-        _vi_to_chains(q, model, opts.samples)
-    else
-        error("Sampler :$(opts.sampler) not yet supported")
-    end
+    chain = _sample(model, opts)
 
     # Extract generated quantities (infections, R, reports) from the
-    # return values of the @model function
-    gen_quants = generated_quantities(model, chain)
+    # return values of the @model function.
+    # Flatten to a Vector for consistent handling (multi-chain returns matrix).
+    gq_vec = vec(Turing.returned(model, chain))
 
-    EpiNow2Fit(chain, gen_quants, metadata)
+    EpiNow2Fit(chain, gq_vec, metadata)
+end
+
+function _sample(model, opts::InferenceOpts)
+    sampler = _make_sampler(opts)
+
+    if opts.sampler == :nuts
+        init = Turing.DynamicPPL.InitFromPrior()
+        if opts.chains > 1
+            Turing.sample(
+                model, sampler, MCMCThreads(),
+                opts.samples, opts.chains;
+                discard_initial=0, progress=opts.progress,
+                initial_params=fill(init, opts.chains)
+            )
+        else
+            Turing.sample(
+                model, sampler, opts.samples;
+                discard_initial=0, progress=opts.progress,
+                initial_params=init
+            )
+        end
+    else  # :advi — validated by _make_sampler
+        Turing.vi(model, sampler)
+    end
 end
 
 """
@@ -44,7 +52,7 @@ metadata for date mapping.
 """
 struct EpiNow2Fit
     chain::MCMCChains.Chains
-    generated_quantities::Vector  # vector of NamedTuples per sample
+    generated_quantities::Vector
     metadata::ModelMetadata
 end
 
@@ -64,8 +72,3 @@ function _make_sampler(opts::InferenceOpts)
     end
 end
 
-function _vi_to_chains(q, model, n_samples)
-    samples = rand(q, n_samples)
-    # TODO: convert to Chains with proper parameter names
-    samples
-end

@@ -1,14 +1,13 @@
 # ── Turing model implementations ─────────────────────────────────────────
 #
 # Direct Turing.jl implementations of EpiNow2's epidemiological models.
-# No EpiAware dependency — these are self-contained.
+# All helper functions are AD-compatible (no array mutation).
 
 using Turing
 using LinearAlgebra
-using FFTW
 
 # ══════════════════════════════════════════════════════════════════════════
-# Core mathematical components
+# Core mathematical components (AD-safe)
 # ══════════════════════════════════════════════════════════════════════════
 
 # ── Discrete convolution ─────────────────────────────────────────────────
@@ -17,21 +16,13 @@ using FFTW
     convolve(signal, kernel)
 
 Discrete convolution of a time series with a delay kernel (PMF).
-Returns a vector of the same length as `signal`.
+Returns a vector of the same length as `signal`. AD-safe (no mutation).
 """
 function convolve(signal::AbstractVector, kernel::AbstractVector)
     n = length(signal)
     k = length(kernel)
-    out = similar(signal)
-    rev_kernel = reverse(kernel)
-    for t in 1:n
-        s = zero(eltype(signal))
-        for j in 1:min(t, k)
-            s += signal[t - j + 1] * rev_kernel[k - j + 1]
-        end
-        out[t] = s
-    end
-    out
+    [sum(signal[t - j + 1] * kernel[j] for j in 1:min(t, k))
+     for t in 1:n]
 end
 
 # ── Renewal equation ─────────────────────────────────────────────────────
@@ -39,10 +30,8 @@ end
 """
     renewal_infections(R, initial_infections, gt_pmf, n_times)
 
-Generate infections via the renewal equation:
-    infections[t] = R[t] * sum(infections[t-s] * gt_pmf[s], s=1..max)
-
-`initial_infections` seeds the first `seeding_time` days.
+Generate infections via the renewal equation. AD-safe: uses vcat to
+build the infection vector without mutation.
 """
 function renewal_infections(
     R::AbstractVector,
@@ -52,108 +41,138 @@ function renewal_infections(
 )
     seeding_time = length(initial_infections)
     total = seeding_time + n_times
-    infections = similar(R, total)
-
-    # Seed period
-    infections[1:seeding_time] .= initial_infections
-
-    # Renewal process
     gt_len = length(gt_pmf)
+
+    # Build infections sequentially via reduction (no mutation)
+    infections = initial_infections
     for t in (seeding_time + 1):total
-        infectiousness = zero(eltype(R))
-        for s in 1:min(t - 1, gt_len)
-            infectiousness += infections[t - s] * gt_pmf[s]
-        end
+        infectiousness = sum(
+            infections[t - s] * gt_pmf[s]
+            for s in 1:min(t - 1, gt_len)
+        )
         rt_idx = t - seeding_time
-        infections[t] = R[rt_idx] * infectiousness
+        new_inf = R[rt_idx] * infectiousness
+        infections = vcat(infections, [new_inf])
     end
 
     infections
 end
 
-# ── Gaussian process (Hilbert space approximation) ───────────────────────
-
-"""
-    spectral_density_matern(ω, α, ρ, ν)
-
-Spectral density of the Matérn covariance function at frequency `ω`.
-"""
-function spectral_density_matern(ω::Real, α::Real, ρ::Real, ν::Real)
-    # S(ω) = α² * (2ν)^ν * (2π)^(D/2) * Γ(ν + D/2) /
-    #         (Γ(ν) * (2ν/ρ² + 4π²ω²)^(ν + D/2))
-    # For D=1 (time series):
-    c = 2 * α^2 * sqrt(π) * gamma(ν + 0.5) / gamma(ν)
-    c * (2ν / ρ^2)^ν / (2ν / ρ^2 + 4π^2 * ω^2)^(ν + 0.5)
-end
-
-"""
-    spectral_density_se(ω, α, ρ)
-
-Spectral density of the squared exponential (RBF) kernel.
-"""
-function spectral_density_se(ω::Real, α::Real, ρ::Real)
-    α^2 * sqrt(2π) * ρ * exp(-2π^2 * ρ^2 * ω^2)
-end
+# ── HSGP: Hilbert space Gaussian process approximation ───────────────────
 
 """
     hsgp_basis(n_basis, boundary, n_times)
 
-Compute Hilbert space basis functions for GP approximation.
+Compute HSGP basis functions matching Stan's implementation.
 Returns matrix of shape (n_times, n_basis).
+
+Stan normalisation: x = 2*(x - mean(x)) / (max(x) - 1), giving x ∈ [-1, 1].
+L = boundary * (max(x) - min(x)) / 2 (half-range scaled by boundary).
 """
 function hsgp_basis(n_basis::Int, boundary::Float64, n_times::Int)
-    L = boundary * n_times
-    x = collect(1.0:n_times) ./ n_times  # normalised time
+    # Normalise x to [-1, 1] matching Stan
+    x_raw = collect(1.0:n_times)
+    x_mean = mean(x_raw)
+    x_range = n_times > 1 ? (x_raw[end] - x_raw[1]) : 1.0
+    x = 2.0 .* (x_raw .- x_mean) ./ x_range
+
+    L = boundary  # boundary * half-range of normalised x (which is 1)
+
     basis = Matrix{Float64}(undef, n_times, n_basis)
     for j in 1:n_basis
-        λ = j * π / (2L)
-        basis[:, j] = sin.(λ .* (x .+ L)) ./ sqrt(L)
+        λ = j * π / (2.0 * L)
+        @. basis[:, j] = sin(λ * (x + L)) / sqrt(L)
     end
     basis
 end
 
 """
-    hsgp_coefficients(n_basis, boundary, n_times, α, ρ, kernel, ν)
+    diagSPD_Matern32(alpha, rho, L, n_basis)
 
-Compute spectral density weights for HSGP basis functions.
+Diagonal spectral density for Matérn 3/2 kernel.
+Matches Stan: `2 * alpha * (sqrt(3)/rho)^1.5 / ((sqrt(3)/rho)^2 + ω²)`.
+"""
+function diagSPD_Matern32(alpha, rho, L, n_basis)
+    factor = 2.0 * alpha * (sqrt(3.0) / rho)^1.5
+    [factor / ((sqrt(3.0) / rho)^2 + (j * π / (2.0 * L))^2)
+     for j in 1:n_basis]
+end
+
+"""
+    diagSPD_Matern12(alpha, rho, L, n_basis)
+
+Diagonal spectral density for Matérn 1/2 kernel (Ornstein-Uhlenbeck).
+Matches Stan: `alpha * sqrt(2 / (rho * (1/rho² + ω²)))`.
+"""
+function diagSPD_Matern12(alpha, rho, L, n_basis)
+    [alpha * sqrt(2.0 / (rho * (1.0 / rho^2 + (j * π / (2.0 * L))^2)))
+     for j in 1:n_basis]
+end
+
+"""
+    diagSPD_Matern52(alpha, rho, L, n_basis)
+
+Diagonal spectral density for Matérn 5/2 kernel.
+Matches Stan: `alpha * sqrt(16 * (sqrt(5)/rho)^5 / (3 * ((sqrt(5)/rho)² + ω²)³))`.
+"""
+function diagSPD_Matern52(alpha, rho, L, n_basis)
+    factor = 16.0 * (sqrt(5.0) / rho)^5
+    [alpha * sqrt(factor / (3.0 * ((sqrt(5.0) / rho)^2 + (j * π / (2.0 * L))^2)^3))
+     for j in 1:n_basis]
+end
+
+"""
+    diagSPD_EQ(alpha, rho, L, n_basis)
+
+Diagonal spectral density for squared exponential (exponentiated quadratic) kernel.
+"""
+function diagSPD_EQ(alpha, rho, L, n_basis)
+    [alpha * sqrt(sqrt(2.0 * π) * rho) *
+     exp(-0.25 * (rho * j * π / (2.0 * L))^2)
+     for j in 1:n_basis]
+end
+
+"""
+    hsgp_coefficients(n_basis, boundary, alpha, rho, kernel, matern_order)
+
+Compute spectral density weights for HSGP basis functions using
+kernel-specific closed forms matching Stan.
 """
 function hsgp_coefficients(
-    n_basis::Int, boundary::Float64, n_times::Int,
-    α::Real, ρ::Real, kernel::Symbol, ν::Float64
+    n_basis::Int, boundary::Float64,
+    alpha, rho, kernel::Symbol, matern_order::Float64
 )
-    L = boundary * n_times
-    weights = Vector{Float64}(undef, n_basis)
-    for j in 1:n_basis
-        ω = j / (2L)
-        weights[j] = if kernel == :se
-            sqrt(spectral_density_se(ω, α, ρ))
+    if kernel == :se
+        diagSPD_EQ(alpha, rho, boundary, n_basis)
+    elseif kernel == :matern
+        if matern_order ≈ 0.5
+            diagSPD_Matern12(alpha, rho, boundary, n_basis)
+        elseif matern_order ≈ 1.5
+            diagSPD_Matern32(alpha, rho, boundary, n_basis)
+        elseif matern_order ≈ 2.5
+            diagSPD_Matern52(alpha, rho, boundary, n_basis)
         else
-            sqrt(spectral_density_matern(ω, α, ρ, ν))
+            error("Unsupported Matérn order: $matern_order. Use 0.5, 1.5, or 2.5")
         end
+    else
+        error("Unknown kernel: $kernel")
     end
-    weights
 end
 
 # ── Day-of-week effect ───────────────────────────────────────────────────
 
 """
-    apply_day_of_week(expected, effect, dates)
+    apply_day_of_week(expected, effect, start_day, n)
 
-Scale expected values by day-of-week effects. `effect` is a simplex of
-length 7 (sums to 7, so mean effect is 1).
+Scale expected values by day-of-week effects. AD-safe (no mutation).
 """
 function apply_day_of_week(
     expected::AbstractVector,
     effect::AbstractVector,
-    start_day::Int,  # day of week of first observation (1=Monday)
+    start_day::Int,
     n::Int
 )
-    scaled = similar(expected, n)
-    for t in 1:n
-        dow = mod1(start_day + t - 1, 7)
-        scaled[t] = expected[t] * effect[dow]
-    end
-    scaled
+    [expected[t] * effect[mod1(start_day + t - 1, 7)] for t in 1:n]
 end
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -161,7 +180,7 @@ end
 # ══════════════════════════════════════════════════════════════════════════
 
 """
-    infections_model(data, gt_pmf, delay_pmf, opts...)
+    infections_model(data, gt_pmf, delay_pmf, ...)
 
 The core Turing model for EpiNow2's `estimate_infections`.
 
@@ -179,6 +198,9 @@ Generative process:
     n_times::Int,
     n_forecast::Int,
     seeding_time::Int,
+    initial_infections_guess::Float64,
+    # HSGP basis (precomputed)
+    hsgp_basis_matrix::Union{Matrix{Float64}, Nothing},
     # Model structure flags
     use_rt::Bool,
     use_gp::Bool,
@@ -186,6 +208,8 @@ Generative process:
     gp_boundary::Float64,
     gp_kernel::Symbol,
     gp_matern_order::Float64,
+    gp_on::Symbol,
+    n_noise_terms::Int,
     use_rw::Bool,
     rw_period::Int,
     use_week_effect::Bool,
@@ -196,40 +220,89 @@ Generative process:
     # Accumulation
     accumulate::AbstractVector{Bool},
     # Population adjustment
-    pop::Float64
+    pop::Float64,
+    # Priors (passed from options)
+    rt_prior::Distribution,
+    gp_alpha_prior::Distribution,
+    gp_ls_prior::Distribution,
+    obs_dispersion_prior::Distribution,
+    obs_scale_prior::Union{Distribution, Nothing},
+    # Uncertain delay distributions (nothing = use fixed gt_pmf/delay_pmf)
+    gt_uncertain::Union{UncertainDistribution, Nothing},
+    delay_uncertain::Union{UncertainDistribution, Nothing},
+    # Truncation adjustment
+    trunc_rev_cmf::Union{AbstractVector{Float64}, Nothing},
+    trunc_uncertain::Union{UncertainDistribution, Nothing}
 )
     total_times = n_times + n_forecast
 
-    # ── Priors: initial conditions ───────────────────────────────────
-    log_initial_infections ~ Normal(log(cases[1] + 1), 2.0)
-    initial_growth ~ Normal(0.0, 0.1)
+    # ── Uncertain delay parameters ────────────────────────────────────
+    # When delay distributions have uncertain parameters, sample them
+    # and recompute the PMF. Otherwise use the precomputed fixed PMF.
+    if !isnothing(gt_uncertain)
+        gt_param_1 ~ gt_uncertain.param_priors[1]
+        gt_param_2 ~ gt_uncertain.param_priors[2]
+        gt_pmf = discretise_ad(
+            gt_uncertain.constructor(gt_param_1, gt_param_2),
+            Int(gt_uncertain.max)
+        )
+    end
 
-    # Seed infections with exponential growth/decay
-    initial_infections = exp.(
-        log_initial_infections .+
-        initial_growth .* collect(0.0:(seeding_time - 1))
-    )
+    if !isnothing(delay_uncertain)
+        delay_param_1 ~ delay_uncertain.param_priors[1]
+        delay_param_2 ~ delay_uncertain.param_priors[2]
+        delay_pmf = discretise_ad(
+            delay_uncertain.constructor(delay_param_1, delay_param_2),
+            Int(delay_uncertain.max)
+        )
+    end
 
     # ── Priors: Rt ───────────────────────────────────────────────────
-    log_R0 ~ Normal(0.0, 1.0)  # prior on log(R0), mean ≈ 1
+    R0 ~ rt_prior
+    log_R0 = log(R0)
+
+    # ── Initial conditions (seeding) ─────────────────────────────────
+    log_initial_infections ~ Normal(initial_infections_guess, 2.0)
+    growth = _R_to_r(R0, gt_pmf)
+    initial_infections = [
+        exp(log_initial_infections + growth * (s - seeding_time))
+        for s in 1:seeding_time
+    ]
 
     if use_gp && !use_rw
         # Gaussian process on log(Rt)
-        gp_alpha ~ truncated(Normal(0.0, 0.01); lower=0.0)
-        gp_rho ~ truncated(
-            LogNormal(log(21.0), 0.5); lower=1.0, upper=60.0
-        )
+        gp_alpha ~ truncated(gp_alpha_prior; lower=0.0)
+        gp_rho ~ truncated(gp_ls_prior; lower=0.0)
+
+        rescaled_rho = 2.0 * gp_rho / n_noise_terms
+
         gp_z ~ filldist(Normal(0.0, 1.0), gp_n_basis)
 
-        # HSGP: basis * diag(spectral_weights) * z
-        basis = hsgp_basis(gp_n_basis, gp_boundary, total_times)
         spd_weights = hsgp_coefficients(
-            gp_n_basis, gp_boundary, total_times,
-            gp_alpha, gp_rho, gp_kernel, gp_matern_order
+            gp_n_basis, gp_boundary,
+            gp_alpha, rescaled_rho, gp_kernel, gp_matern_order
         )
-        gp_f = basis * (spd_weights .* gp_z)
+        gp_f = hsgp_basis_matrix * (spd_weights .* gp_z)
 
-        log_R = log_R0 .+ gp_f
+        if gp_on == :R0
+            # Stationary: GP values added directly, extend last value
+            gp_full = if length(gp_f) < total_times
+                vcat(gp_f, fill(gp_f[end], total_times - length(gp_f)))
+            else
+                gp_f[1:total_times]
+            end
+            log_R = log_R0 .+ gp_full
+        else
+            # Non-stationary: cumsum of GP increments, prepend 0
+            gp_cumsum = vcat([zero(eltype(gp_f))], cumsum(gp_f))
+            # Extend to total_times by holding last value constant
+            gp_full = if length(gp_cumsum) < total_times
+                vcat(gp_cumsum, fill(gp_cumsum[end], total_times - length(gp_cumsum)))
+            else
+                gp_cumsum[1:total_times]
+            end
+            log_R = log_R0 .+ gp_full
+        end
     elseif use_rw
         # Random walk on log(Rt)
         n_steps = div(total_times, rw_period)
@@ -237,12 +310,11 @@ Generative process:
         rw_noise ~ filldist(Normal(0.0, 1.0), n_steps)
 
         rw_values = cumsum(rw_sd .* rw_noise)
-        # Expand to daily: each step covers rw_period days
-        log_R = Vector{eltype(rw_values)}(undef, total_times)
-        for t in 1:total_times
-            step = min(div(t - 1, rw_period) + 1, n_steps)
-            log_R[t] = log_R0 + rw_values[step]
-        end
+        # Expand to daily (AD-safe comprehension)
+        log_R = [
+            log_R0 + rw_values[min(div(t - 1, rw_period) + 1, n_steps)]
+            for t in 1:total_times
+        ]
     else
         # Fixed Rt
         log_R = fill(log_R0, total_times)
@@ -266,13 +338,14 @@ Generative process:
     infections = all_infections[(seeding_time + 1):end]
 
     # ── Map to expected reports ──────────────────────────────────────
-    expected_reports = convolve(infections, delay_pmf)
+    # Convolve all infections (including seeding) then extract post-seeding
+    all_reports = convolve(all_infections, delay_pmf)
+    expected_reports = all_reports[(seeding_time + 1):end]
 
     # ── Day-of-week effect ───────────────────────────────────────────
     if use_week_effect
-        # Simplex prior: Dirichlet centred on uniform
         week_effect ~ Dirichlet(fill(1.0, week_length))
-        scaled_effect = week_effect .* week_length  # scale so mean = 1
+        scaled_effect = week_effect .* week_length
         expected_reports = apply_day_of_week(
             expected_reports, scaled_effect, start_day, total_times
         )
@@ -280,8 +353,31 @@ Generative process:
 
     # ── Observation scale (fraction reported) ────────────────────────
     if use_obs_scale
-        frac_observed ~ Beta(5.0, 5.0)
+        frac_observed ~ obs_scale_prior
         expected_reports = expected_reports .* frac_observed
+    end
+
+    # ── Truncation adjustment ─────────────────────────────────────
+    if !isnothing(trunc_uncertain)
+        trunc_param_1 ~ trunc_uncertain.param_priors[1]
+        trunc_param_2 ~ trunc_uncertain.param_priors[2]
+        trunc_dist = trunc_uncertain.constructor(trunc_param_1, trunc_param_2)
+        trunc_pmf = discretise_ad(trunc_dist, Int(trunc_uncertain.max))
+        trunc_rev_cmf = reverse(cumsum(trunc_pmf))
+    end
+
+    if !isnothing(trunc_rev_cmf)
+        trunc_max = length(trunc_rev_cmf)
+        expected_reports = [
+            let days_from_end = n_times - t
+                if days_from_end < trunc_max
+                    expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
+                else
+                    expected_reports[t]
+                end
+            end
+            for t in 1:length(expected_reports)
+        ]
     end
 
     # ── Accumulation (e.g., weekly reporting) ────────────────────────
@@ -294,12 +390,12 @@ Generative process:
     # ── Likelihood ───────────────────────────────────────────────────
     if obs_family == :negbin
         reporting_overdispersion ~ truncated(
-            Normal(0.0, 0.25); lower=0.0
+            obs_dispersion_prior; lower=0.0
         )
         φ = 1.0 / reporting_overdispersion^2
         for t in 1:n_times
             μ = max(expected_reports[t], 1e-6)
-            cases[t] ~ NegativeBinomial2(μ, φ)
+            Turing.@addlogprob! _negbin2_logpmf(cases[t], μ, φ)
         end
     else  # :poisson
         for t in 1:n_times
@@ -322,11 +418,25 @@ end
 
 Negative binomial parameterised by mean `μ` and precision `φ`.
 Var = μ + μ²/φ. Equivalent to Stan's neg_binomial_2.
+Only for use with non-AD-tracked arguments (e.g. for sampling).
 """
 function NegativeBinomial2(μ, φ)
     p = φ / (μ + φ)
     r = φ
     NegativeBinomial(r, p)
+end
+
+"""
+    _negbin2_logpmf(y, μ, φ)
+
+Log-PMF of NegativeBinomial2(μ, φ) at y. AD-compatible: avoids
+constructing a NegativeBinomial distribution with tracked parameters.
+Uses the standard formula: log p(y|μ,φ) = logΓ(y+φ) - logΓ(φ) - logΓ(y+1)
+    + φ log(φ/(μ+φ)) + y log(μ/(μ+φ))
+"""
+function _negbin2_logpmf(y::Int, μ, φ)
+    loggamma(y + φ) - loggamma(φ) - loggamma(y + 1) +
+        φ * log(φ / (μ + φ)) + y * log(μ / (μ + φ))
 end
 
 # ── Secondary observations model ─────────────────────────────────────────
@@ -339,27 +449,20 @@ end
     is_prevalence::Bool,
     obs_family::Symbol
 )
-    # Fraction of primary that become secondary
     frac ~ Beta(5.0, 5.0)
-
-    # Scale primary
     scaled_primary = frac .* Float64.(primary)
-
-    # Convolve with delay
     expected = convolve(scaled_primary, delay_pmf)
 
-    # For prevalence: cumulative
     if is_prevalence
         expected = cumsum(expected)
     end
 
-    # Likelihood
     if obs_family == :negbin
         overdispersion ~ truncated(Normal(0.0, 0.25); lower=0.0)
         φ = 1.0 / overdispersion^2
         for t in 1:n_times
             μ = max(expected[t], 1e-6)
-            secondary[t] ~ NegativeBinomial2(μ, φ)
+            Turing.@addlogprob! _negbin2_logpmf(secondary[t], μ, φ)
         end
     else
         for t in 1:n_times
@@ -378,28 +481,20 @@ end
     snapshot_lengths::Vector{Int},
     max_trunc::Int
 )
-    # Parameters of truncation distribution (log-normal)
     trunc_meanlog ~ Normal(0.0, 1.0)
     trunc_sdlog ~ truncated(Normal(1.0, 1.0); lower=0.0)
 
-    # Build truncation PMF
     d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
     trunc_pmf = [cdf(d, k + 0.5) - cdf(d, k - 0.5) for k in 0:max_trunc]
-    trunc_pmf ./= sum(trunc_pmf)
-
-    # CDF for survival function
+    trunc_pmf = trunc_pmf ./ sum(trunc_pmf)
     trunc_cdf = cumsum(trunc_pmf)
 
-    # The latest (most complete) snapshot is treated as truth
     final = last(snapshots)
 
-    # Earlier snapshots are truncated versions of truth
     for (i, snap) in enumerate(snapshots[1:end-1])
         n = snapshot_lengths[i]
-        days_before_final = snapshot_lengths[end] - n
-
         for t in 1:n
-            days_truncated = n - t  # how many days of truncation
+            days_truncated = n - t
             if days_truncated < max_trunc
                 reporting_prob = trunc_cdf[days_truncated + 1]
             else
@@ -437,21 +532,86 @@ function assemble_model(
     n_forecast = forecast.horizon
     total_times = n_times + n_forecast
 
-    # Discretise distributions
-    gt_pmf = discretise(generation_time.dist)
-    delay_pmf = discretise(delays.dist)
-    seeding_time = length(gt_pmf) - 1
+    # Discretise distributions (fixed case) or pass through (uncertain case)
+    gt_uncertain = generation_time.dist isa UncertainDistribution ?
+        generation_time.dist : nothing
+    delay_uncertain = delays.dist isa UncertainDistribution ?
+        delays.dist : nothing
+
+    # For fixed distributions, discretise now. For uncertain, provide a
+    # placeholder PMF (the model will recompute from sampled params).
+    # Generation time PMF: drop P(GT=0) since the renewal equation
+    # indexes gt_pmf[s] as the weight for infections[t-s], i.e.,
+    # gt_pmf[1] = P(GT=1). This matches R/Stan convention.
+    # Generation time PMF: drop P(GT=0) since gt_pmf[s] weights
+    # infections[t-s] in the renewal equation (1-indexed).
+    gt_pmf = if isnothing(gt_uncertain)
+        _drop_zero_delay(discretise(generation_time.dist).pmf)
+    else
+        discretise_ad(
+            gt_uncertain.constructor([mean(p) for p in gt_uncertain.param_priors]...),
+            Int(gt_uncertain.max)
+        )
+    end
+
+    delay_pmf = if isnothing(delay_uncertain)
+        discretise(delays.dist).pmf
+    else
+        discretise_ad(
+            delay_uncertain.constructor([mean(p) for p in delay_uncertain.param_priors]...),
+            Int(delay_uncertain.max)
+        )
+    end
+
+    # Truncation: fixed, uncertain, or none
+    trunc_uncertain = truncation.dist isa UncertainDistribution ?
+        truncation.dist : nothing
+    trunc_rev_cmf = if !isnothing(trunc_uncertain)
+        nothing  # model will compute from sampled params
+    elseif truncation.dist isa Dirac && truncation.dist.value == 0.0
+        nothing  # no truncation
+    else
+        trunc_pmf = discretise(truncation.dist).pmf
+        reverse(cumsum(trunc_pmf))
+    end
+
+    # Seeding time: max of generation time and total delay, at least 1
+    # Matches R: max(sum of delay means, max generation time)
+    seeding_time = max(length(gt_pmf) - 1, length(delay_pmf) - 1, 1)
 
     # GP configuration
     use_gp = rt.use_rt && gp.basis_prop > 0 && rt.rw == 0
-    gp_n_basis = use_gp ? max(1, round(Int, gp.basis_prop * total_times)) : 0
+    stationary = rt.gp_on == :R0
+    future_fixed = rt.future == :latest
+    # Number of GP noise terms (matches Stan's setup_noise)
+    noise_terms = if !use_gp
+        0
+    else
+        nt = stationary ? total_times : total_times - 1
+        future_fixed ? nt - n_forecast : nt
+    end
+    gp_n_basis = use_gp ? max(1, round(Int, gp.basis_prop * noise_terms)) : 0
     gp_boundary = gp.boundary_scale
+
+    # Precompute HSGP basis on noise_terms dimensions
+    basis_matrix = use_gp ?
+        hsgp_basis(gp_n_basis, gp_boundary, noise_terms) : nothing
 
     # Random walk configuration
     use_rw = rt.use_rt && rt.rw > 0
 
     # Day of week
     start_day = Dates.dayofweek(data.date[1])
+
+    # Observation scale
+    use_obs_scale = obs.scale isa Distribution
+    obs_scale_prior = use_obs_scale ? obs.scale : nothing
+
+    # Empirical prior on initial infections: log(mean(first 7 cases))
+    # Matches Stan's initial_infections_guess
+    n_early = min(7, n_times)
+    initial_infections_guess = max(0.0,
+        log(Statistics.mean(data.confirm[1:n_early]) + 1e-6))
 
     model = infections_model(
         data.confirm,
@@ -460,31 +620,40 @@ function assemble_model(
         n_times,
         n_forecast,
         seeding_time,
+        initial_infections_guess,
+        basis_matrix,
         rt.use_rt,
         use_gp,
         gp_n_basis,
         gp_boundary,
         gp.kernel,
         gp.matern_order,
+        rt.gp_on,
+        noise_terms,
         use_rw,
         rt.rw,
         obs.week_effect,
         obs.week_length,
         start_day,
         obs.family,
-        !(obs.scale isa FixedSpec && obs.scale.value == 1.0),
+        use_obs_scale,
         data.accumulate,
-        rt.pop
+        rt.pop,
+        # Priors
+        rt.prior,
+        gp.alpha,
+        gp.ls,
+        obs.dispersion,
+        obs_scale_prior,
+        gt_uncertain,
+        delay_uncertain,
+        trunc_rev_cmf,
+        trunc_uncertain
     )
 
     metadata = ModelMetadata(
-        dates = data.date,
-        seeding_time = seeding_time,
-        horizon = n_forecast,
-        gt_pmf = gt_pmf,
-        delay_pmf = delay_pmf,
-        rt_opts = rt,
-        obs_opts = obs
+        data.date, seeding_time, n_forecast,
+        gt_pmf, delay_pmf, rt, obs
     )
 
     (model=model, metadata=metadata)
@@ -508,19 +677,50 @@ end
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
+"""
+    _drop_zero_delay(pmf)
+
+Drop the P(delay=0) element from a PMF and renormalise.
+"""
+function _drop_zero_delay(pmf::AbstractVector)
+    stripped = pmf[2:end]
+    stripped ./ sum(stripped)
+end
+
+"""
+    _R_to_r(R, gt_pmf; tol=1e-3)
+
+Convert reproduction number R to exponential growth rate r using
+Newton's method. Solves R * Σ_k pmf[k] * exp(-r*k) = 1.
+"""
+function _R_to_r(R, gt_pmf; tol=1e-3)
+    n = length(gt_pmf)
+    k_series = collect(1.0:n)
+    mean_gt = sum(gt_pmf[i] * k_series[i] for i in 1:n)
+    r = max((R - 1) / (R * mean_gt), -1.0)
+    step = tol + 1.0
+    while abs(step) > tol
+        exp_r = exp.(-r .* k_series)
+        num = R * sum(gt_pmf .* exp_r) - 1.0
+        den = -R * sum(gt_pmf .* k_series .* exp_r)
+        step = num / den
+        r -= step
+    end
+    r
+end
+
 function _apply_accumulation(
     expected::AbstractVector, accumulate::AbstractVector{Bool}, n::Int
 )
-    result = similar(expected, n)
-    buffer = zero(eltype(expected))
-    for t in 1:n
-        buffer += expected[t]
+    buf = zero(eltype(expected))
+    [begin
+        buf = buf + expected[t]
         if !accumulate[t]
-            result[t] = buffer
-            buffer = zero(eltype(expected))
+            out = buf
+            buf = zero(eltype(expected))
+            out
         else
-            result[t] = zero(eltype(expected))
+            zero(eltype(expected))
         end
-    end
-    result
+    end for t in 1:n]
 end

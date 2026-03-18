@@ -76,6 +76,33 @@ struct SecondaryData
     end
 end
 
+# ── Example data ─────────────────────────────────────────────────────────
+
+"""
+    example_confirmed() -> DataFrame
+
+Return a DataFrame with ~60 days of synthetic case data for use in examples
+and testing. Columns: `:date` and `:confirm`.
+"""
+function example_confirmed()
+    n_days = 60
+    dates = Date(2024, 3, 1):Day(1):Date(2024, 3, 1) + Day(n_days - 1)
+    # Deterministic renewal process with time-varying Rt
+    rt = [1.0 + 0.3 * sin(2π * t / 40) for t in 1:n_days]
+    infections = zeros(Float64, n_days)
+    infections[1] = 100.0
+    gt_pmf = [0.0, 0.3, 0.4, 0.2, 0.1]
+    for t in 2:n_days
+        λ = rt[t] * sum(
+            infections[max(t - s, 1)] * gt_pmf[min(s + 1, length(gt_pmf))]
+            for s in 1:min(t - 1, length(gt_pmf) - 1)
+        )
+        infections[t] = max(λ, 1.0)
+    end
+    cases = [max(1, round(Int, x)) for x in infections]
+    DataFrame(date=collect(dates), confirm=cases)
+end
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 function _fill_missing_dates(dates, confirm)

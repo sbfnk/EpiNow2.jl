@@ -26,12 +26,8 @@ Estimate infections, Rt, and growth rate from reported case data.
 ```julia
 result = estimate_infections(
     data,
-    generation_time = gt_opts(
-        LogNormalSpec(meanlog=1.6, sdlog=0.5, max=14)
-    ),
-    delays = delay_opts(
-        LogNormalSpec(meanlog=0.5, sdlog=0.5, max=14)
-    )
+    generation_time = gt_opts(LogNormal(1.6, 0.5)),
+    delays = delay_opts(LogNormal(0.5, 0.5))
 )
 summary(result)
 ```
@@ -74,23 +70,16 @@ end
     epinow(data; generation_time, delays, ..., CrIs, target_folder)
 
 Estimate infections, Rt, growth rate, and forecast reported cases.
-
-Wrapper around `estimate_infections` that adds output management and
-optional file saving.
+Wrapper around `estimate_infections` that adds output management.
 
 # Example
 ```julia
 result = epinow(
     data,
-    generation_time = gt_opts(
-        LogNormalSpec(meanlog=1.6, sdlog=0.5, max=14)
-    ),
-    delays = delay_opts(
-        LogNormalSpec(meanlog=0.5, sdlog=0.5, max=14)
-    )
+    generation_time = gt_opts(LogNormal(1.6, 0.5)),
+    delays = delay_opts(LogNormal(0.5, 0.5))
 )
 summary(result)
-plot(result)
 ```
 """
 function epinow(
@@ -128,5 +117,5 @@ end
 
 function _save_results(result::EpinowResult, folder::String)
     mkpath(folder)
-    # TODO: CSV.write for each summary DataFrame, serialize fit
+    # TODO: CSV.write for each summary DataFrame, serialise fit
 end
