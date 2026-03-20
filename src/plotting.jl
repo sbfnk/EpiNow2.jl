@@ -4,18 +4,32 @@
 
 using CairoMakie
 
+# ── Comma-formatted tick labels ──────────────────────────────────────────
+
+function _comma_format(x::Real)
+    n = round(Int, x)
+    s = string(abs(n))
+    parts = String[]
+    while length(s) > 3
+        push!(parts, s[end-2:end])
+        s = s[1:end-3]
+    end
+    push!(parts, s)
+    result = join(reverse(parts), ",")
+    n < 0 ? "-" * result : result
+end
+
 # ── Distribution plots ────────────────────────────────────────────────────
 
 """
     plot(d::DelayDistribution; n_samples=50)
 
 Plot a delay distribution. For fixed distributions, shows the discretised
-PMF. For uncertain distributions, draws `n_samples` realisations from the
-prior and shows the spread of PMFs.
+PMF as a step function. For uncertain distributions, draws `n_samples`
+realisations from the prior and shows the spread.
 """
 function CairoMakie.Makie.plot(d::Distribution; max::Union{Int, Nothing}=nothing)
-    npd = discretise(d; max=max)
-    _plot_pmf(npd)
+    _plot_pmf(discretise(d; max=max))
 end
 
 function CairoMakie.Makie.plot(d::NonParametricDist)
@@ -24,30 +38,28 @@ end
 
 function CairoMakie.Makie.plot(d::UncertainDistribution; n_samples::Int=50)
     fig = Figure(size=(600, 400))
+    mean_params = [mean(p) for p in d.param_priors]
+    example = d.constructor(mean_params...)
     ax = Axis(fig[1, 1]; xlabel="Delay", ylabel="Probability",
-              title="Uncertain $(_dist_family(d.constructor([mean(p) for p in d.param_priors]...))) distribution")
+              title="Uncertain $(_dist_family(example)) distribution")
 
     max_val = Int(d.max)
 
-    # Draw samples from priors and discretise each
     for _ in 1:n_samples
         sampled_params = [rand(p) for p in d.param_priors]
         try
             dist = d.constructor(sampled_params...)
             pmf = discretise(dist; max=max_val).pmf
-            lines!(ax, 0:(length(pmf) - 1), pmf;
-                   color=(:steelblue, 0.15), linewidth=1)
+            stairs!(ax, -0.5:(length(pmf) - 0.5), vcat(pmf, [0.0]);
+                    color=(:steelblue, 0.15), linewidth=1, step=:post)
         catch
             continue
         end
     end
 
-    # Show mean PMF
-    mean_params = [mean(p) for p in d.param_priors]
-    mean_dist = d.constructor(mean_params...)
-    mean_pmf = discretise(mean_dist; max=max_val).pmf
-    lines!(ax, 0:(length(mean_pmf) - 1), mean_pmf;
-           color=:steelblue, linewidth=2.5)
+    mean_pmf = discretise(example; max=max_val).pmf
+    stairs!(ax, -0.5:(length(mean_pmf) - 0.5), vcat(mean_pmf, [0.0]);
+            color=:steelblue, linewidth=2.5, step=:post)
 
     fig
 end
@@ -57,7 +69,6 @@ function CairoMakie.Makie.plot(d::CompositeDelay; n_samples::Int=50)
     ax = Axis(fig[1, 1]; xlabel="Delay", ylabel="Probability",
               title="Composite distribution")
 
-    # For each sample, discretise all components and convolve
     for _ in 1:n_samples
         pmfs = Vector{Float64}[]
         ok = true
@@ -65,8 +76,7 @@ function CairoMakie.Makie.plot(d::CompositeDelay; n_samples::Int=50)
             if c isa UncertainDistribution
                 sampled = [rand(p) for p in c.param_priors]
                 try
-                    dist = c.constructor(sampled...)
-                    push!(pmfs, discretise(dist; max=Int(c.max)).pmf)
+                    push!(pmfs, discretise(c.constructor(sampled...); max=Int(c.max)).pmf)
                 catch
                     ok = false; break
                 end
@@ -76,14 +86,13 @@ function CairoMakie.Makie.plot(d::CompositeDelay; n_samples::Int=50)
         end
         ok || continue
         conv = reduce(_convolve_pmfs, pmfs)
-        lines!(ax, 0:(length(conv) - 1), conv;
-               color=(:steelblue, 0.15), linewidth=1)
+        stairs!(ax, -0.5:(length(conv) - 0.5), vcat(conv, [0.0]);
+                color=(:steelblue, 0.15), linewidth=1, step=:post)
     end
 
-    # Mean composite
     mean_pmf = discretise(d).pmf
-    lines!(ax, 0:(length(mean_pmf) - 1), mean_pmf;
-           color=:steelblue, linewidth=2.5)
+    stairs!(ax, -0.5:(length(mean_pmf) - 0.5), vcat(mean_pmf, [0.0]);
+            color=:steelblue, linewidth=2.5, step=:post)
 
     fig
 end
@@ -92,7 +101,8 @@ function _plot_pmf(d::NonParametricDist)
     fig = Figure(size=(600, 400))
     ax = Axis(fig[1, 1]; xlabel="Delay", ylabel="Probability",
               title="Delay distribution")
-    barplot!(ax, 0:(length(d.pmf) - 1), d.pmf; color=:steelblue)
+    stairs!(ax, -0.5:(length(d.pmf) - 0.5), vcat(d.pmf, [0.0]);
+            color=:steelblue, linewidth=2, step=:post)
     fig
 end
 
@@ -116,7 +126,7 @@ function CairoMakie.Makie.plot(
 )
     fd = isnothing(forecast_date) ? result.observations.date[end] : forecast_date
 
-    fig = Figure(size=(800, 700))
+    fig = Figure(size=(600, 800))
 
     _plot_panel!(fig[1, 1], result.infections, "Infections by date of infection";
                  CrI, forecast_date=fd)
@@ -133,11 +143,6 @@ function CairoMakie.Makie.plot(result::EpinowResult; kwargs...)
     plot(result.estimates; kwargs...)
 end
 
-"""
-    _plot_panel!(pos, df, title; CrI, forecast_date, observed, hline)
-
-Plot a single panel with median line, 50% and outer CrI ribbons.
-"""
 function _plot_panel!(
     pos, df::DataFrame, title::String;
     CrI::Float64=0.9,
@@ -151,7 +156,8 @@ function _plot_panel!(
         title=title,
         xlabel="Date",
         ylabel="",
-        xticklabelrotation=π/6
+        xticklabelrotation=π/6,
+        ytickformat=vs -> [_comma_format(v) for v in vs]
     )
 
     dates = df.date
@@ -163,23 +169,23 @@ function _plot_panel!(
     hi_outer = Symbol("upper_$cri_pct")
     if hasproperty(df, lo_outer) && hasproperty(df, hi_outer)
         band!(ax, date_nums, df[!, lo_outer], df[!, hi_outer];
-              color=(:steelblue, 0.15), label="$(cri_pct)% CrI")
+              color=(:steelblue, 0.15))
     end
 
     # 50% CrI ribbon
     if hasproperty(df, :lower_50) && hasproperty(df, :upper_50)
         band!(ax, date_nums, df.lower_50, df.upper_50;
-              color=(:steelblue, 0.3), label="50% CrI")
+              color=(:steelblue, 0.3))
     end
 
     # Median line
-    lines!(ax, date_nums, df.median; color=:steelblue, linewidth=2, label="Median")
+    lines!(ax, date_nums, df.median; color=:steelblue, linewidth=2)
 
     # Observed data points
     if !isnothing(observed)
         obs_nums = Dates.value.(observed.date .- dates[1])
         scatter!(ax, obs_nums, Float64.(observed.confirm);
-                 color=:black, markersize=4, label="Observed")
+                 color=:black, markersize=4)
     end
 
     # Reference line

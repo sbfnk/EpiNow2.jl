@@ -168,27 +168,28 @@ plot(result)
 
 ### Reproduction number
 
-The estimated time-varying reproduction number:
+The estimated time-varying reproduction number (last 7 days):
 
 ```{julia}
-result.rt[!, [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]]
+cols = [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]
+last(result.rt[!, cols], 7)
 ```
 
 ### Estimated infections
 
-The latent infection trajectory (by date of infection):
+The latent infection trajectory (last 7 days):
 
 ```{julia}
-result.infections[!, [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]]
+last(result.infections[!, cols], 7)
 ```
 
 ### Reported cases and forecasts
 
-Expected reported cases, including the 7-day forecast period beyond the
-data:
+Expected reported cases for the forecast period:
 
 ```{julia}
-result.reports[!, [:date, :median, :lower_50, :upper_50, :lower_90, :upper_90]]
+forecast_start = result.observations.date[end]
+filter(r -> r.date > forecast_start, result.reports)[!, cols]
 ```
 
 ### Fitted parameters
