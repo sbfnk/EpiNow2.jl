@@ -15,8 +15,9 @@ using Distributions
 # We use the example case data from R's EpiNow2 package (UK COVID-19 cases,
 # Feb-Jun 2020). For speed, we use the first 60 days.
 
+pkgdir = dirname(dirname(pathof(EpiNow2)))
 reported_cases = CSV.read(
-    joinpath(@__DIR__, "..", "test", "reference", "example_confirmed_full.csv"),
+    joinpath(pkgdir, "test", "reference", "example_confirmed_full.csv"),
     DataFrame
 )
 reported_cases.date = Date.(reported_cases.date)

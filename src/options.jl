@@ -26,6 +26,11 @@ gt_opts(dist::DelayDistribution=Dirac(1.0); kwargs...) =
 
 # ── Reporting delays ─────────────────────────────────────────────────────
 
+"""
+    DelayOpts(; dist, weight_prior)
+
+Reporting delay distribution options. Construct via `delay_opts(dist)`.
+"""
 Base.@kwdef struct DelayOpts
     dist::DelayDistribution = Dirac(0.0)
     weight_prior::Bool = true
@@ -36,6 +41,11 @@ delay_opts(dist::DelayDistribution=Dirac(0.0); kwargs...) =
 
 # ── Truncation ───────────────────────────────────────────────────────────
 
+"""
+    TruncOpts(; dist, weight_prior)
+
+Right-truncation distribution options. Construct via `trunc_opts(dist)`.
+"""
 Base.@kwdef struct TruncOpts
     dist::DelayDistribution = Dirac(0.0)
     weight_prior::Bool = false
@@ -94,6 +104,15 @@ gp_opts(; kwargs...) = GPOpts(; kwargs...)
 
 # ── Observation model ────────────────────────────────────────────────────
 
+"""
+    ObsOpts(; family, dispersion, week_effect, scale, ...)
+
+Observation model options. Construct via `obs_opts()`.
+
+- `family`: `:negbin` or `:poisson`
+- `week_effect`: day-of-week reporting effects (default: `true`)
+- `scale`: fraction observed, as a `Distribution` for a prior or `Float64` for fixed
+"""
 Base.@kwdef struct ObsOpts
     family::Symbol = :negbin
     dispersion::Distribution = Normal(0.0, 0.25)
@@ -119,6 +138,13 @@ backcalc_opts(; kwargs...) = BackcalcOpts(; kwargs...)
 
 # ── Forecasting ──────────────────────────────────────────────────────────
 
+"""
+    ForecastOpts(; horizon, accumulate)
+
+Forecasting options. Construct via `forecast_opts()`.
+
+- `horizon`: number of days to forecast (default: `7`)
+"""
 Base.@kwdef struct ForecastOpts
     horizon::Int = 7
     accumulate::Union{Int, Nothing} = nothing
