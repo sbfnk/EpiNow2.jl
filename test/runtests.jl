@@ -254,4 +254,60 @@ using Random
         @test nrow(result.infections) > 0
         @test all(result.infections.mean .> 0)
     end
+
+    @testset "estimate_secondary" begin
+        Random.seed!(42)
+
+        n_days = 40
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, 1) + Day(n_days - 1)
+        cases = round.(Int, 100 .* exp.(0.03 .* (1:n_days)))
+        deaths = [max(1, round(Int, 0.02 * cases[max(1, i - 5)])) for i in 1:n_days]
+        data = DataFrame(date=collect(dates), primary=cases, secondary=deaths)
+
+        result = estimate_secondary(
+            data;
+            delays = delay_opts(LogNormal(1.5, 0.5)),
+            obs = obs_opts(week_effect=false),
+            inference = inference_opts(
+                samples=100, warmup=100, chains=1, progress=false
+            ),
+            burn_in=10,
+            verbose=false
+        )
+
+        @test result isa EpiNow2.EstimateSecondaryResult
+        @test nrow(result.predictions) > 0
+    end
+
+    @testset "estimate_truncation" begin
+        Random.seed!(42)
+
+        # Create synthetic snapshots: each later one has more complete recent data
+        n_days = 30
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, n_days)
+        full_cases = round.(Int, 100 .* exp.(0.03 .* (1:n_days)))
+
+        snapshots = DataFrame[]
+        for snap_day in [20, 25, 30]
+            snap_dates = dates[1:snap_day]
+            snap_cases = copy(full_cases[1:snap_day])
+            # Truncate recent days
+            for d in 1:min(5, snap_day)
+                snap_cases[snap_day - d + 1] = max(1,
+                    round(Int, snap_cases[snap_day - d + 1] * (d / 6)))
+            end
+            push!(snapshots, DataFrame(date=collect(snap_dates), confirm=snap_cases))
+        end
+
+        result = estimate_truncation(
+            snapshots;
+            inference = inference_opts(
+                samples=100, warmup=100, chains=1, progress=false
+            ),
+            verbose=false
+        )
+
+        @test result isa EpiNow2.EstimateTruncationResult
+        @test result.dist isa LogNormal
+    end
 end

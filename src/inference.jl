@@ -8,7 +8,7 @@
 
 Run Bayesian inference on the assembled Turing model.
 """
-function run_inference(model, metadata::ModelMetadata, opts::InferenceOpts)
+function run_inference(model, metadata, opts::InferenceOpts)
     chain = _sample(model, opts)
 
     # Extract generated quantities (infections, R, reports) from the
@@ -53,7 +53,7 @@ metadata for date mapping.
 struct EpiNow2Fit
     chain::MCMCChains.Chains
     generated_quantities::Vector
-    metadata::ModelMetadata
+    metadata::Any
 end
 
 # ── Sampler construction ─────────────────────────────────────────────────

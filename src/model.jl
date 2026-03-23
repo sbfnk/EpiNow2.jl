@@ -445,7 +445,8 @@ end
     primary::AbstractVector{Int},
     secondary::AbstractVector{Int},
     delay_pmf::AbstractVector{Float64},
-    n_times::Int,
+    n_obs::Int,
+    burn_in::Int,
     is_prevalence::Bool,
     obs_family::Symbol
 )
@@ -460,13 +461,13 @@ end
     if obs_family == :negbin
         overdispersion ~ truncated(Normal(0.0, 0.25); lower=0.0)
         φ = 1.0 / overdispersion^2
-        for t in 1:n_times
-            μ = max(expected[t], 1e-6)
+        for t in 1:n_obs
+            μ = max(expected[burn_in + t], 1e-6)
             Turing.@addlogprob! _negbin2_logpmf(secondary[t], μ, φ)
         end
     else
-        for t in 1:n_times
-            μ = max(expected[t], 1e-6)
+        for t in 1:n_obs
+            μ = max(expected[burn_in + t], 1e-6)
             secondary[t] ~ Poisson(μ)
         end
     end
@@ -482,10 +483,11 @@ end
     max_trunc::Int
 )
     trunc_meanlog ~ Normal(0.0, 1.0)
-    trunc_sdlog ~ truncated(Normal(1.0, 1.0); lower=0.0)
+    trunc_sdlog ~ truncated(Normal(0.5, 0.5); lower=0.01)
 
     d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
-    trunc_pmf = [cdf(d, k + 0.5) - cdf(d, k - 0.5) for k in 0:max_trunc]
+    cd = CensoredDistributions.double_interval_censored(d; interval=1, upper=max_trunc + 1)
+    trunc_pmf = [exp(logpdf(cd, k)) for k in 0:max_trunc]
     trunc_pmf = trunc_pmf ./ sum(trunc_pmf)
     trunc_cdf = cumsum(trunc_pmf)
 
@@ -501,7 +503,7 @@ end
                 reporting_prob = 1.0
             end
             expected = final[t] * reporting_prob
-            snap[t] ~ Poisson(max(expected, 1e-6))
+            Turing.@addlogprob! logpdf(Poisson(max(expected, 1e-6)), snap[t])
         end
     end
 
