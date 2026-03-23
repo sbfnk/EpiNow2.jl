@@ -30,8 +30,8 @@ end
 """
     renewal_infections(R, initial_infections, gt_pmf, n_times)
 
-Generate infections via the renewal equation. AD-safe: uses vcat to
-build the infection vector without mutation.
+Generate infections via the renewal equation. AD-safe: pre-allocates
+the output vector and fills sequentially (no `vcat` loop).
 """
 function renewal_infections(
     R::AbstractVector,
@@ -43,16 +43,16 @@ function renewal_infections(
     total = seeding_time + n_times
     gt_len = length(gt_pmf)
 
-    # Build infections sequentially via reduction (no mutation)
-    infections = initial_infections
+    T = promote_type(eltype(R), eltype(initial_infections), eltype(gt_pmf))
+    infections = Vector{T}(undef, total)
+    infections[1:seeding_time] .= initial_infections
+
     for t in (seeding_time + 1):total
         infectiousness = sum(
             infections[t - s] * gt_pmf[s]
             for s in 1:min(t - 1, gt_len)
         )
-        rt_idx = t - seeding_time
-        new_inf = R[rt_idx] * infectiousness
-        infections = vcat(infections, [new_inf])
+        infections[t] = R[t - seeding_time] * infectiousness
     end
 
     infections
