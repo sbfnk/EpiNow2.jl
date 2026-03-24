@@ -123,7 +123,9 @@ end
 
 Extract fitted scalar parameters from the chain.
 """
-function get_parameters(result::EstimateInfectionsResult)
+get_parameters(result::EpinowResult) = get_parameters(result.estimates)
+
+function get_parameters(result)
     chain = result.fit.chain
     params = Dict{Symbol, Any}()
     for name in names(chain)
