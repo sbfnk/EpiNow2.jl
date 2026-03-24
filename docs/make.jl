@@ -13,6 +13,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Workflow" => "estimate_infections_workflow.md",
+        "Multiple data streams" => "secondary.md",
         "API Reference" => "api.md",
     ],
     warnonly=[:missing_docs, :cross_references, :docs_block]

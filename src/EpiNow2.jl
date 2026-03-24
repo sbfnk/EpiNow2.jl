@@ -43,7 +43,8 @@ export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
 
 # ── Main inference functions ────────────────────────────────────────────
 export epinow, estimate_infections, estimate_secondary,
-       estimate_truncation, regional_epinow, example_confirmed
+       estimate_truncation, regional_epinow, example_confirmed,
+       simulate_secondary, forecast_secondary
 
 # ── Accessors ───────────────────────────────────────────────────────────
 export get_samples, get_predictions, get_parameters
