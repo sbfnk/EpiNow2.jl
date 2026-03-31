@@ -49,6 +49,8 @@ Right-truncation distribution options. Construct via `trunc_opts(dist)`.
 Base.@kwdef struct TruncOpts
     dist::DelayDistribution = Dirac(0.0)
     weight_prior::Bool = false
+    meanlog_prior::Distribution = Normal(0.0, 1.0)
+    sdlog_prior::Distribution = truncated(Normal(0.5, 0.5); lower=0.01)
 end
 
 trunc_opts(dist::DelayDistribution=Dirac(0.0); kwargs...) =
@@ -64,7 +66,8 @@ Options for time-varying reproduction number estimation.
 - `prior`: Prior on initial Rt (default: LogNormal(mean=1, sd=1))
 - `use_rt`: Whether to use Rt model vs back-calculation (default: true)
 - `rw`: Random walk period in days (0=none, 7=weekly) (default: 0)
-- `future`: How to handle Rt in forecast: `:latest` (hold constant), `:project` (extend GP) (default: `:latest`)
+- `future`: How to handle Rt in forecast: `:latest` (hold constant), `:project` (extend GP), `:estimate` (fix from `fixed_from` days before end) (default: `:latest`)
+- `fixed_from`: Days before end to fix Rt when `future=:estimate` (default: 0)
 - `gp_on`: Apply GP to `:Rt_minus_1` or `:R0` (default: `:Rt_minus_1`)
 - `pop`: Susceptible population for depletion adjustment (default: 0=none)
 """
@@ -73,8 +76,9 @@ Base.@kwdef struct RtOpts
     use_rt::Bool = true
     rw::Int = 0
     future::Symbol = :latest
+    fixed_from::Int = 0
     gp_on::Symbol = :Rt_minus_1
-    pop::Float64 = 0.0
+    pop::Union{Float64, Distribution} = 0.0
     pop_period::Symbol = :forecast
     pop_floor::Float64 = 1.0
 end
@@ -119,6 +123,7 @@ Base.@kwdef struct ObsOpts
     week_effect::Bool = true
     week_length::Int = 7
     scale::Union{Float64, Distribution} = 1.0
+    likelihood::Bool = true
 end
 
 obs_opts(; kwargs...) = ObsOpts(; kwargs...)

@@ -40,6 +40,7 @@ result.regional[:A]
 function regional_epinow(
     data::DataFrame;
     non_zero_points::Int = 7,
+    target_folder::Union{String, Nothing} = nothing,
     verbose::Bool = false,
     kwargs...
 )
@@ -90,6 +91,14 @@ function regional_epinow(
         timings[string(regions[i])] = region_timings[i]
     end
 
+    # Save per-region results to disk
+    if !isnothing(target_folder)
+        for (region, res) in results
+            res isa Exception && continue
+            _save_results(res, joinpath(target_folder, region))
+        end
+    end
+
     RegionalEpinowResult(results, timings)
 end
 
@@ -100,12 +109,20 @@ end
 
 function Base.summary(result::RegionalEpinowResult)
     # Cross-region summary: latest Rt, cases, growth rate per region
+    # Includes probability of decrease and change category
     rows = []
     for (region, res) in result.regional
         res isa Exception && continue
         s = summary(res.estimates; type=:snapshot)
         s[!, :region] .= region
+
+        # Add probability of decrease and change category for Rt
+        p_dec = prob_decrease(res.estimates)
+        s[!, :prob_decrease] .= p_dec
+        s[!, :change] .= map_prob_change(p_dec)
+
         push!(rows, s)
     end
+    isempty(rows) && return DataFrame()
     vcat(rows...)
 end

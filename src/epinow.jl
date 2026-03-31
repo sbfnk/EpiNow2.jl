@@ -119,18 +119,8 @@ end
 function _save_results(result::EpinowResult, folder::String)
     mkpath(folder)
     est = result.estimates
-    _write_csv(joinpath(folder, "infections.csv"), est.infections)
-    _write_csv(joinpath(folder, "reports.csv"), est.reports)
-    _write_csv(joinpath(folder, "rt.csv"), est.rt)
-    _write_csv(joinpath(folder, "growth_rate.csv"), est.growth_rate)
-end
-
-function _write_csv(path::String, df::DataFrame)
-    isempty(df) && return
-    open(path, "w") do io
-        println(io, join(names(df), ","))
-        for row in eachrow(df)
-            println(io, join([row[c] for c in names(df)], ","))
-        end
-    end
+    isempty(est.infections) || CSV.write(joinpath(folder, "infections.csv"), est.infections)
+    isempty(est.reports) || CSV.write(joinpath(folder, "reports.csv"), est.reports)
+    isempty(est.rt) || CSV.write(joinpath(folder, "rt.csv"), est.rt)
+    isempty(est.growth_rate) || CSV.write(joinpath(folder, "growth_rate.csv"), est.growth_rate)
 end

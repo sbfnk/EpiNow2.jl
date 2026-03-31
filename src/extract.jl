@@ -319,3 +319,48 @@ function _parameter_summary(result, CrIs)
         cols=:union
     )
 end
+
+"""
+    get_imputed_reports(result; CrIs=[0.2, 0.5, 0.9])
+
+Generate integer-valued imputed report draws by sampling from the fitted
+observation model (NegBin or Poisson) for each posterior sample.
+
+Returns a summary DataFrame matching the format of `result.reports`.
+"""
+function get_imputed_reports(
+    result::EstimateInfectionsResult;
+    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+)
+    fit = result.fit
+    gqs = fit.generated_quantities
+    params = get_parameters(result)
+    dates = _output_dates(fit.metadata)
+    obs = fit.metadata.obs_opts
+    n_samples = length(gqs)
+
+    has_phi = haskey(params, :reporting_overdispersion)
+    phi_samples = has_phi ? params[:reporting_overdispersion] : nothing
+
+    n_times = length(first(gqs).reports)
+    n_dates = min(n_times, length(dates))
+    mat = Matrix{Float64}(undef, n_dates, n_samples)
+
+    for (i, gq) in enumerate(gqs)
+        reports = gq.reports
+        for t in 1:n_dates
+            μ = max(Float64(reports[t]), 1e-6)
+            if has_phi
+                φ = 1.0 / Float64(phi_samples[i])^2
+                mat[t, i] = Float64(rand(NegativeBinomial2(μ, φ)))
+            else
+                mat[t, i] = Float64(rand(Poisson(μ)))
+            end
+        end
+    end
+
+    _matrix_to_summary(mat, dates[1:n_dates], CrIs)
+end
+
+get_imputed_reports(result::EpinowResult; kwargs...) =
+    get_imputed_reports(result.estimates; kwargs...)

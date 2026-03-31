@@ -145,6 +145,232 @@ function simulate_infections(
 end
 
 """
+    forecast_infections(result, R_trajectory; generation_time, delays, obs, CrIs)
+
+Forecast infections and reports by applying posterior parameter draws from a
+fitted model to a new Rt trajectory. Uses the renewal equation with each
+posterior sample's parameters.
+
+# Arguments
+- `result::EstimateInfectionsResult` — fitted model result
+- `R_trajectory::DataFrame` — must have `:date` and `:R` columns for forecast period
+
+# Returns
+A `DataFrame` with summary statistics for forecasted reports.
+"""
+function forecast_infections(
+    result::EstimateInfectionsResult,
+    R_trajectory::DataFrame;
+    generation_time::GTOpts = gt_opts(LogNormal(1.6, 0.5)),
+    delays::DelayOpts = delay_opts(),
+    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+)
+    sorted_R = sort(R_trajectory, :date)
+    forecast_dates = Date.(sorted_R.date)
+    R_vals = Float64.(sorted_R.R)
+    n_forecast = length(forecast_dates)
+
+    gt_pmf = _drop_zero_delay(discretise(generation_time.dist).pmf)
+    delay_pmf = discretise(delays.dist).pmf
+    gt_len = length(gt_pmf)
+
+    # Get the last infections from each posterior sample to seed the forecast
+    gqs = result.fit.generated_quantities
+    n_samples = length(gqs)
+    params = get_parameters(result)
+
+    mat = Matrix{Float64}(undef, n_forecast, n_samples)
+
+    for (si, gq) in enumerate(gqs)
+        # Use the tail of infections from this sample as history
+        inf_history = Float64.(gq.infections)
+        n_hist = length(inf_history)
+
+        # Run renewal equation forward with the new R trajectory
+        new_infections = Vector{Float64}(undef, n_forecast)
+        for s in 1:n_forecast
+            infectiousness = 0.0
+            for j in 1:gt_len
+                if s - j > 0
+                    infectiousness += new_infections[s - j] * gt_pmf[j]
+                else
+                    # Reach back into history
+                    hist_idx = n_hist + (s - j)
+                    if hist_idx >= 1
+                        infectiousness += inf_history[hist_idx] * gt_pmf[j]
+                    end
+                end
+            end
+            new_infections[s] = R_vals[s] * infectiousness
+        end
+
+        # Convolve with delay
+        expected = convolve(new_infections, delay_pmf)
+
+        for t in 1:n_forecast
+            mat[t, si] = expected[t]
+        end
+    end
+
+    _matrix_to_summary(mat, forecast_dates, CrIs)
+end
+
+forecast_infections(result::EpinowResult, args...; kwargs...) =
+    forecast_infections(result.estimates, args...; kwargs...)
+
+"""
+    estimate_dist(data; family, max_delay)
+
+Fit a delay distribution to line-list data using maximum likelihood.
+
+# Arguments
+- `data::DataFrame` — must have columns for event dates (e.g. `:date_onset`, `:date_report`)
+  or a single `:delay` column with pre-computed delays
+- `family::Symbol` — `:lognormal` (default) or `:gamma`
+- `max_delay::Int` — maximum delay to consider (default: 30)
+
+# Returns
+A fitted `Distribution` (LogNormal or Gamma).
+"""
+function estimate_dist(
+    data::DataFrame;
+    family::Symbol = :lognormal,
+    max_delay::Int = 30
+)
+    delays = if :delay in propertynames(data)
+        Float64.(data.delay)
+    elseif :date_onset in propertynames(data) && :date_report in propertynames(data)
+        Float64.(Dates.value.(data.date_report .- data.date_onset))
+    else
+        throw(ArgumentError("Data must have :delay column or :date_onset/:date_report columns"))
+    end
+
+    # Filter valid delays
+    valid = filter(d -> d > 0 && d <= max_delay, delays)
+    isempty(valid) && throw(ArgumentError("No valid delays found"))
+
+    if family == :lognormal
+        fit(LogNormal, valid)
+    elseif family == :gamma
+        fit(Gamma, valid)
+    else
+        throw(ArgumentError("Unsupported family: $family. Use :lognormal or :gamma"))
+    end
+end
+
+"""
+    bootstrapped_dist_fit(data; family, max_delay, n_bootstraps)
+
+Fit a delay distribution with bootstrap uncertainty quantification.
+Returns an `UncertainDistribution` with priors derived from the bootstrap
+distribution of parameters.
+
+# Arguments
+- `data::DataFrame` — same format as `estimate_dist`
+- `family::Symbol` — `:lognormal` or `:gamma`
+- `n_bootstraps::Int` — number of bootstrap resamples (default: 100)
+
+# Returns
+An `UncertainDistribution` with Normal priors on parameters derived from
+the bootstrap mean and standard deviation.
+"""
+function bootstrapped_dist_fit(
+    data::DataFrame;
+    family::Symbol = :lognormal,
+    max_delay::Int = 30,
+    n_bootstraps::Int = 100
+)
+    delays = if :delay in propertynames(data)
+        Float64.(data.delay)
+    elseif :date_onset in propertynames(data) && :date_report in propertynames(data)
+        Float64.(Dates.value.(data.date_report .- data.date_onset))
+    else
+        throw(ArgumentError("Data must have :delay column or :date_onset/:date_report columns"))
+    end
+
+    valid = filter(d -> d > 0 && d <= max_delay, delays)
+    isempty(valid) && throw(ArgumentError("No valid delays found"))
+    n = length(valid)
+
+    # Bootstrap
+    param_samples = Vector{Vector{Float64}}(undef, n_bootstraps)
+    for b in 1:n_bootstraps
+        resample = valid[rand(1:n, n)]
+        d = if family == :lognormal
+            fit(LogNormal, resample)
+        else
+            fit(Gamma, resample)
+        end
+        param_samples[b] = collect(params(d))
+    end
+
+    n_params = length(param_samples[1])
+    param_means = [mean(param_samples[b][i] for b in 1:n_bootstraps) for i in 1:n_params]
+    param_sds = [std([param_samples[b][i] for b in 1:n_bootstraps]) for i in 1:n_params]
+
+    constructor = if family == :lognormal
+        (μ, σ) -> LogNormal(μ, σ)
+    else
+        (α, θ) -> Gamma(α, θ)
+    end
+
+    priors = Distribution[
+        Normal(param_means[i], max(param_sds[i], 1e-4))
+        for i in 1:n_params
+    ]
+
+    UncertainDistribution(constructor, priors, Float64(max_delay))
+end
+
+"""
+    get_regional_results(folder; regions=nothing)
+
+Load saved regional results from disk. Reads CSV files written by
+`regional_epinow()` with `target_folder`.
+
+# Arguments
+- `folder::String` — path containing per-region subdirectories
+- `regions` — specific regions to load (default: all subdirectories)
+
+# Returns
+A Dict mapping region names to Dict of DataFrames
+(`:infections`, `:reports`, `:rt`, `:growth_rate`).
+"""
+function get_regional_results(
+    folder::String;
+    regions::Union{Vector{String}, Nothing} = nothing
+)
+    isdir(folder) || throw(ArgumentError("Directory not found: $folder"))
+
+    available = filter(d -> isdir(joinpath(folder, d)), readdir(folder))
+    load_regions = isnothing(regions) ? available : regions
+
+    results = Dict{String, Dict{Symbol, DataFrame}}()
+    for region in load_regions
+        region_dir = joinpath(folder, region)
+        isdir(region_dir) || continue
+
+        region_data = Dict{Symbol, DataFrame}()
+        for (name, file) in [
+            (:infections, "infections.csv"),
+            (:reports, "reports.csv"),
+            (:rt, "rt.csv"),
+            (:growth_rate, "growth_rate.csv")
+        ]
+            path = joinpath(region_dir, file)
+            if isfile(path)
+                region_data[name] = DataFrame(
+                    CSV.File(path; dateformat="yyyy-mm-dd")
+                )
+            end
+        end
+        results[region] = region_data
+    end
+
+    results
+end
+
+"""
     opts_list(regions, opts; ...)
 
 Create a Dict mapping region names to per-region options.

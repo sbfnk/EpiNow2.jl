@@ -21,6 +21,7 @@ plot(result)
 """
 module EpiNow2
 
+using CSV
 using CairoMakie
 using CensoredDistributions
 using Dates
@@ -50,11 +51,13 @@ export epinow, estimate_infections, estimate_secondary,
        example_reporting_delay
 
 # ── Accessors ───────────────────────────────────────────────────────────
-export get_samples, get_predictions, get_parameters
+export get_samples, get_predictions, get_parameters, get_imputed_reports
 
 # ── Utilities ──────────────────────────────────────────────────────────
 export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
-       simulate_infections, opts_list
+       simulate_infections, forecast_infections, opts_list,
+       estimate_dist, bootstrapped_dist_fit,
+       get_regional_results, report_plots, plot_summary
 
 # ── Re-export Makie functions so plotting works without extra imports ───
 using CairoMakie: save as save_figure

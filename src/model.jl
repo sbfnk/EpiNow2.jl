@@ -259,6 +259,7 @@ Generative process:
     accumulate::AbstractVector{Bool},
     # Population adjustment
     pop::Float64,
+    pop_prior::Union{Distribution, Nothing},
     pop_period::Symbol,
     pop_floor::Float64,
     n_non_horizon::Int,
@@ -281,7 +282,9 @@ Generative process:
     bps::AbstractVector{Int},
     # Back-calculation
     shifted_cases::Union{AbstractVector{Float64}, Nothing},
-    backcalc_prior::Symbol
+    backcalc_prior::Symbol,
+    # Prior weighting (1/n_obs when weight_prior=true)
+    delay_prior_weight::Float64
 )
     total_times = n_times + n_forecast
 
@@ -293,7 +296,12 @@ Generative process:
         for (ci, ud) in enumerate(gt_uncertain)
             ud_params = Vector{Real}(undef, length(ud.param_priors))
             for (i, prior) in enumerate(ud.param_priors)
-                ud_params[i] ~ prior
+                if delay_prior_weight ≈ 1.0
+                    ud_params[i] ~ prior
+                else
+                    ud_params[i] ~ Flat()
+                    Turing.@addlogprob! delay_prior_weight * logpdf(prior, ud_params[i])
+                end
             end
             gt_pmfs[ci] = discretise_ad(
                 ud.constructor(ud_params...), Int(ud.max)
@@ -308,7 +316,12 @@ Generative process:
         for (ci, ud) in enumerate(delay_uncertain)
             ud_params = Vector{Real}(undef, length(ud.param_priors))
             for (i, prior) in enumerate(ud.param_priors)
-                ud_params[i] ~ prior
+                if delay_prior_weight ≈ 1.0
+                    ud_params[i] ~ prior
+                else
+                    ud_params[i] ~ Flat()
+                    Turing.@addlogprob! delay_prior_weight * logpdf(prior, ud_params[i])
+                end
             end
             delay_pmfs[ci] = discretise_ad(
                 ud.constructor(ud_params...), Int(ud.max)
@@ -402,6 +415,11 @@ Generative process:
         R = exp.(log_R)
 
         # ── Generate infections (renewal equation) ───────────────────
+        # Sample population if uncertain
+        if !isnothing(pop_prior)
+            pop ~ pop_prior
+        end
+
         if pop > 0
             # SIR-like depletion: infections = S * (1 - exp(-R * infectiousness / S))
             gt_len = length(gt_pmf)
@@ -688,10 +706,12 @@ end
 @model function truncation_model(
     snapshots::Vector{Vector{Int}},
     snapshot_lengths::Vector{Int},
-    max_trunc::Int
+    max_trunc::Int,
+    meanlog_prior::Distribution,
+    sdlog_prior::Distribution
 )
-    trunc_meanlog ~ Normal(0.0, 1.0)
-    trunc_sdlog ~ truncated(Normal(0.5, 0.5); lower=0.01)
+    trunc_meanlog ~ meanlog_prior
+    trunc_sdlog ~ sdlog_prior
 
     d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
     cd = CensoredDistributions.double_interval_censored(d; interval=1, upper=max_trunc + 1)
@@ -791,7 +811,7 @@ function assemble_model(
     # GP configuration
     use_gp = gp.basis_prop > 0 && (rt.use_rt ? rt.rw == 0 : true)
     stationary = rt.gp_on == :R0
-    future_fixed = rt.future == :latest
+    future_fixed = rt.future in (:latest, :estimate)
     # Number of GP noise terms (matches Stan's setup_noise)
     noise_terms = if !use_gp
         0
@@ -800,7 +820,7 @@ function assemble_model(
         total_times
     else
         nt = stationary ? total_times : total_times - 1
-        future_fixed ? nt - n_forecast : nt
+        future_fixed ? nt - n_forecast + rt.fixed_from : nt
     end
     gp_n_basis = use_gp ? max(1, round(Int, gp.basis_prop * noise_terms)) : 0
     gp_boundary = gp.boundary_scale
@@ -893,7 +913,8 @@ function assemble_model(
         obs.family,
         use_obs_scale,
         data.accumulate,
-        rt.pop,
+        rt.pop isa Distribution ? 0.0 : Float64(rt.pop),
+        rt.pop isa Distribution ? rt.pop : nothing,
         rt.pop_period,
         rt.pop_floor,
         n_times,  # n_non_horizon (observations period)
@@ -907,11 +928,14 @@ function assemble_model(
         delay_uncertain,
         trunc_rev_cmf,
         trunc_uncertain,
-        obs.weight,
+        obs.likelihood ? obs.weight : 0.0,
         bp_n,
         bps,
         shifted_cases,
-        backcalc.prior
+        backcalc.prior,
+        # Prior weight: 1/n_obs when weight_prior=true, else 1.0
+        (generation_time.weight_prior || delays.weight_prior) ?
+            1.0 / n_times : 1.0
     )
 
     metadata = ModelMetadata(

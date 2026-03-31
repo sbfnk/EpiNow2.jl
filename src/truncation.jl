@@ -65,7 +65,10 @@ function estimate_truncation(
 
     verbose && @info "Estimating truncation..." n_snapshots=length(data) max_trunc
 
-    model = truncation_model(snapshots, snapshot_lengths, max_trunc)
+    model = truncation_model(
+        snapshots, snapshot_lengths, max_trunc,
+        truncation.meanlog_prior, truncation.sdlog_prior
+    )
 
     metadata = TruncationMetadata(
         [Date.(s.date) for s in sorted_snaps],

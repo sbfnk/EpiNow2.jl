@@ -206,3 +206,69 @@ function _plot_panel!(
 
     ax
 end
+
+# ── Reporting utilities ──────────────────────────────────────────────────
+
+"""
+    report_plots(result; CrI=0.9)
+
+Generate a complete set of reporting plots: infections, reports, Rt,
+and growth rate. Returns a Dict of Figures keyed by name.
+"""
+function report_plots(
+    result::EstimateInfectionsResult;
+    CrI::Float64=0.9,
+    forecast_date::Union{Date, Nothing}=nothing
+)
+    fd = isnothing(forecast_date) ? result.observations.date[end] : forecast_date
+
+    plots = Dict{Symbol, Figure}()
+
+    for (name, df, title, hline) in [
+        (:infections, result.infections, "Infections by date of infection", nothing),
+        (:reports, result.reports, "Reported cases by date of report", nothing),
+        (:rt, result.rt, "Effective reproduction number (Rt)", 1.0),
+        (:growth_rate, result.growth_rate, "Growth rate", 0.0)
+    ]
+        isempty(df) && continue
+        fig = Figure(size=(600, 400))
+        obs = name == :reports ? result.observations : nothing
+        _plot_panel!(fig[1, 1], df, title; CrI, forecast_date=fd,
+                     observed=obs, hline=hline)
+        plots[name] = fig
+    end
+
+    plots
+end
+
+report_plots(result::EpinowResult; kwargs...) =
+    report_plots(result.estimates; kwargs...)
+
+"""
+    plot_summary(result; CrI=0.9)
+
+Generate a summary plot with Rt and cases side-by-side.
+Returns a Makie `Figure`.
+"""
+function plot_summary(
+    result::EstimateInfectionsResult;
+    CrI::Float64=0.9,
+    forecast_date::Union{Date, Nothing}=nothing
+)
+    fd = isnothing(forecast_date) ? result.observations.date[end] : forecast_date
+
+    fig = Figure(size=(900, 400))
+
+    _plot_panel!(fig[1, 1], result.rt,
+                 "Effective reproduction number (Rt)";
+                 CrI, forecast_date=fd, hline=1.0)
+    _plot_panel!(fig[1, 2], result.reports,
+                 "Reported cases";
+                 CrI, forecast_date=fd,
+                 observed=result.observations)
+
+    fig
+end
+
+plot_summary(result::EpinowResult; kwargs...) =
+    plot_summary(result.estimates; kwargs...)
