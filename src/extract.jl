@@ -219,17 +219,20 @@ end
 function _matrix_to_summary(
     mat::Matrix{Float64}, dates::Vector{Date}, CrIs::Vector{Float64}
 )
+    # Replace NaN/Inf with 0 for robust quantile computation
+    clean = replace(mat, NaN => 0.0, Inf => 0.0, -Inf => 0.0)
+
     base = (
         date = dates,
-        mean = vec(mean(mat; dims=2)),
-        median = vec(mapslices(median, mat; dims=2)),
-        sd = vec(mapslices(std, mat; dims=2))
+        mean = vec(mean(clean; dims=2)),
+        median = vec(mapslices(median, clean; dims=2)),
+        sd = vec(mapslices(std, clean; dims=2))
     )
     cri_cols = NamedTuple()
     for cri in CrIs
         pct = round(Int, cri * 100)
-        lo = vec(mapslices(v -> quantile(v, (1 - cri) / 2), mat; dims=2))
-        hi = vec(mapslices(v -> quantile(v, (1 + cri) / 2), mat; dims=2))
+        lo = vec(mapslices(v -> quantile(v, (1 - cri) / 2), clean; dims=2))
+        hi = vec(mapslices(v -> quantile(v, (1 + cri) / 2), clean; dims=2))
         cri_cols = merge(cri_cols,
             NamedTuple{(Symbol("lower_$pct"), Symbol("upper_$pct"))}((lo, hi)))
     end
@@ -252,7 +255,8 @@ function _compute_growth_rate(
     for (i, gq) in enumerate(gqs)
         inf = gq[:infections]
         for t in 1:n_growth
-            mat[t, i] = log(Float64(inf[t + 1])) - log(Float64(inf[t]))
+            mat[t, i] = log(max(Float64(inf[t + 1]), 1e-10)) -
+                        log(max(Float64(inf[t]), 1e-10))
         end
     end
 

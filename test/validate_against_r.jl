@@ -90,7 +90,7 @@ function run_julia_test1(data)
         gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
         forecast = forecast_opts(horizon=7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=2, progress=false
+            samples=1000, warmup=500, chains=1, seed=42, progress=false
         ),
         verbose=false
     )
@@ -106,7 +106,7 @@ function run_julia_test2(data)
         gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
         forecast = forecast_opts(horizon=7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=2, progress=false
+            samples=1000, warmup=500, chains=1, seed=42, progress=false
         ),
         verbose=false
     )
@@ -122,7 +122,7 @@ function run_julia_test3(data)
         gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
         forecast = forecast_opts(horizon=7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=2, progress=false
+            samples=1000, warmup=500, chains=1, seed=42, progress=false
         ),
         verbose=false
     )
@@ -138,7 +138,7 @@ function run_julia_test4(data)
         gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
         forecast = forecast_opts(horizon=7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=2, progress=false
+            samples=1000, warmup=500, chains=1, seed=42, progress=false
         ),
         verbose=false
     )
