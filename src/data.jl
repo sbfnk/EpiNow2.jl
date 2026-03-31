@@ -35,6 +35,12 @@ struct EpiData
         # Check dates are contiguous (daily)
         diffs = diff(Dates.value.(dates))
         if !all(diffs .== 1)
+            if :accumulate in propertynames(sorted) || :breakpoints in propertynames(sorted)
+                throw(ArgumentError(
+                    "Non-contiguous dates with accumulate/breakpoints columns " *
+                    "are not supported. Fill gaps before constructing EpiData."
+                ))
+            end
             @warn "Non-contiguous dates detected; missing dates will be " *
                   "filled with zeros"
             dates, confirm = _fill_missing_dates(dates, confirm)

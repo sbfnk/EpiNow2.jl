@@ -119,8 +119,8 @@ end
 function _save_results(result::EpinowResult, folder::String)
     mkpath(folder)
     est = result.estimates
-    isempty(est.infections) || CSV.write(joinpath(folder, "infections.csv"), est.infections)
-    isempty(est.reports) || CSV.write(joinpath(folder, "reports.csv"), est.reports)
-    isempty(est.rt) || CSV.write(joinpath(folder, "rt.csv"), est.rt)
-    isempty(est.growth_rate) || CSV.write(joinpath(folder, "growth_rate.csv"), est.growth_rate)
+    for (name, df) in [("infections", est.infections), ("reports", est.reports),
+                        ("rt", est.rt), ("growth_rate", est.growth_rate)]
+        isempty(df) || CSV.write(joinpath(folder, "$name.csv"), df)
+    end
 end

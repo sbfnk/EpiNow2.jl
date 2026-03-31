@@ -83,7 +83,16 @@ Base.@kwdef struct RtOpts
     pop_floor::Float64 = 1.0
 end
 
-rt_opts(; kwargs...) = RtOpts(; kwargs...)
+function rt_opts(; kwargs...)
+    opts = RtOpts(; kwargs...)
+    opts.future in (:latest, :project, :estimate) ||
+        throw(ArgumentError("future must be :latest, :project, or :estimate, got :$(opts.future)"))
+    opts.gp_on in (:Rt_minus_1, :R0) ||
+        throw(ArgumentError("gp_on must be :Rt_minus_1 or :R0, got :$(opts.gp_on)"))
+    opts.pop_period in (:forecast, :all) ||
+        throw(ArgumentError("pop_period must be :forecast or :all, got :$(opts.pop_period)"))
+    opts
+end
 
 # ── Gaussian process ─────────────────────────────────────────────────────
 
@@ -251,7 +260,7 @@ function Base.show(io::IO, ::MIME"text/plain", o::RtOpts)
     o.rw > 0 && println(io, "  random walk period: $(o.rw)")
     println(io, "  gp_on: $(o.gp_on)")
     println(io, "  future: $(o.future)")
-    o.pop > 0 && println(io, "  population: $(o.pop)")
+    (o.pop isa Number ? o.pop > 0 : true) && println(io, "  population: $(o.pop)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::ObsOpts)

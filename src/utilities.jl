@@ -1,14 +1,6 @@
 # ── Utility functions ─────────────────────────────────────────────────────
 
 """
-    R_to_growth(R, gt_pmf; tol=1e-3, max_iter=100)
-
-Convert reproduction number R to exponential growth rate r.
-Solves R * Σ_k pmf[k] * exp(-r*k) = 1 via Newton's method.
-"""
-R_to_growth(R, gt_pmf; kwargs...) = _R_to_r(R, gt_pmf; kwargs...)
-
-"""
     growth_to_R(r, gt_pmf)
 
 Convert exponential growth rate r to reproduction number R.
@@ -218,6 +210,29 @@ end
 forecast_infections(result::EpinowResult, args...; kwargs...) =
     forecast_infections(result.estimates, args...; kwargs...)
 
+function _extract_delays(data::DataFrame; max_delay::Int)
+    delays = if :delay in propertynames(data)
+        Float64.(data.delay)
+    elseif :date_onset in propertynames(data) && :date_report in propertynames(data)
+        Float64.(Dates.value.(data.date_report .- data.date_onset))
+    else
+        throw(ArgumentError("Data must have :delay column or :date_onset/:date_report columns"))
+    end
+    valid = filter(d -> d > 0 && d <= max_delay, delays)
+    isempty(valid) && throw(ArgumentError("No valid delays found"))
+    valid
+end
+
+function _fit_family(family::Symbol, data::AbstractVector{Float64})
+    if family == :lognormal
+        fit(LogNormal, data)
+    elseif family == :gamma
+        fit(Gamma, data)
+    else
+        throw(ArgumentError("Unsupported family: $family. Use :lognormal or :gamma"))
+    end
+end
+
 """
     estimate_dist(data; family, max_delay)
 
@@ -237,25 +252,8 @@ function estimate_dist(
     family::Symbol = :lognormal,
     max_delay::Int = 30
 )
-    delays = if :delay in propertynames(data)
-        Float64.(data.delay)
-    elseif :date_onset in propertynames(data) && :date_report in propertynames(data)
-        Float64.(Dates.value.(data.date_report .- data.date_onset))
-    else
-        throw(ArgumentError("Data must have :delay column or :date_onset/:date_report columns"))
-    end
-
-    # Filter valid delays
-    valid = filter(d -> d > 0 && d <= max_delay, delays)
-    isempty(valid) && throw(ArgumentError("No valid delays found"))
-
-    if family == :lognormal
-        fit(LogNormal, valid)
-    elseif family == :gamma
-        fit(Gamma, valid)
-    else
-        throw(ArgumentError("Unsupported family: $family. Use :lognormal or :gamma"))
-    end
+    valid = _extract_delays(data; max_delay)
+    _fit_family(family, valid)
 end
 
 """
@@ -280,27 +278,14 @@ function bootstrapped_dist_fit(
     max_delay::Int = 30,
     n_bootstraps::Int = 100
 )
-    delays = if :delay in propertynames(data)
-        Float64.(data.delay)
-    elseif :date_onset in propertynames(data) && :date_report in propertynames(data)
-        Float64.(Dates.value.(data.date_report .- data.date_onset))
-    else
-        throw(ArgumentError("Data must have :delay column or :date_onset/:date_report columns"))
-    end
-
-    valid = filter(d -> d > 0 && d <= max_delay, delays)
-    isempty(valid) && throw(ArgumentError("No valid delays found"))
+    valid = _extract_delays(data; max_delay)
     n = length(valid)
 
     # Bootstrap
     param_samples = Vector{Vector{Float64}}(undef, n_bootstraps)
     for b in 1:n_bootstraps
         resample = valid[rand(1:n, n)]
-        d = if family == :lognormal
-            fit(LogNormal, resample)
-        else
-            fit(Gamma, resample)
-        end
+        d = _fit_family(family, resample)
         param_samples[b] = collect(params(d))
     end
 

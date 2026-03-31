@@ -3,9 +3,6 @@
 # Direct Turing.jl implementations of EpiNow2's epidemiological models.
 # Helper functions are AD-compatible with ForwardDiff.
 
-using Turing
-using LinearAlgebra
-
 # ══════════════════════════════════════════════════════════════════════════
 # Core mathematical components (AD-safe)
 # ══════════════════════════════════════════════════════════════════════════
@@ -308,7 +305,7 @@ Generative process:
             )
         end
         gt_pmf = length(gt_pmfs) == 1 ? gt_pmfs[1] :
-            reduce((a, b) -> _convolve_pmfs_ad(a, b), gt_pmfs)
+            reduce((a, b) -> _convolve_pmfs(a, b), gt_pmfs)
     end
 
     if !isempty(delay_uncertain)
@@ -328,7 +325,7 @@ Generative process:
             )
         end
         delay_pmf = length(delay_pmfs) == 1 ? delay_pmfs[1] :
-            reduce((a, b) -> _convolve_pmfs_ad(a, b), delay_pmfs)
+            reduce((a, b) -> _convolve_pmfs(a, b), delay_pmfs)
     end
 
     # ── Priors: Rt ───────────────────────────────────────────────────
@@ -337,7 +334,7 @@ Generative process:
 
     # ── Initial conditions (seeding) ─────────────────────────────────
     log_initial_infections ~ Normal(initial_infections_guess, 2.0)
-    growth = _R_to_r(R0, gt_pmf)
+    growth = R_to_growth(R0, gt_pmf)
     initial_infections = [
         exp(log_initial_infections + growth * (s - seeding_time))
         for s in 1:seeding_time
@@ -353,7 +350,7 @@ Generative process:
         fill(0.0, total_times)
     end
 
-    if use_gp && !use_rw
+    if use_rt && use_gp && !use_rw
         # Gaussian process on log(Rt)
         gp_alpha ~ truncated(gp_alpha_prior; lower=0.0)
         gp_rho ~ truncated(gp_ls_prior; lower=0.0)
@@ -975,12 +972,12 @@ function _drop_zero_delay(pmf::AbstractVector)
 end
 
 """
-    _R_to_r(R, gt_pmf; tol=1e-3)
+    R_to_growth(R, gt_pmf; tol=1e-3)
 
 Convert reproduction number R to exponential growth rate r using
 Newton's method. Solves R * Σ_k pmf[k] * exp(-r*k) = 1.
 """
-function _R_to_r(R, gt_pmf; tol=1e-3, max_iter=100)
+function R_to_growth(R, gt_pmf; tol=1e-3, max_iter=100)
     n = length(gt_pmf)
     k_series = collect(1.0:n)
     mean_gt = sum(gt_pmf[i] * k_series[i] for i in 1:n)
@@ -1005,13 +1002,6 @@ function _extract_uncertain(d::CompositeDelay)
 end
 function _extract_uncertain(d)
     UncertainDistribution[]
-end
-
-"""AD-safe PMF convolution for use inside Turing @model."""
-function _convolve_pmfs_ad(a::AbstractVector, b::AbstractVector)
-    na, nb = length(a), length(b)
-    [sum(a[i] * b[j] for i in 1:na for j in 1:nb if i + j - 1 == k)
-     for k in 1:(na + nb - 1)]
 end
 
 function _apply_accumulation(

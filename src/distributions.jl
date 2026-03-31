@@ -272,17 +272,13 @@ Convolve two discretised distributions or raw PMF vectors.
 Equivalent to `a + b` for `NonParametricDist`.
 """
 convolve_pmfs(a::NonParametricDist, b::NonParametricDist) = a + b
-convolve_pmfs(a::AbstractVector{Float64}, b::AbstractVector{Float64}) =
+convolve_pmfs(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}) =
     _convolve_pmfs(a, b)
 
-function _convolve_pmfs(a::AbstractVector{Float64}, b::AbstractVector{Float64})
+function _convolve_pmfs(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
     na, nb = length(a), length(b)
-    n_out = na + nb - 1
-    out = zeros(Float64, n_out)
-    for i in 1:na, j in 1:nb
-        out[i + j - 1] += a[i] * b[j]
-    end
-    out
+    [sum(a[i] * b[k - i + 1] for i in max(1, k - nb + 1):min(k, na))
+     for k in 1:(na + nb - 1)]
 end
 
 # ── AD-safe discretisation ───────────────────────────────────────────────

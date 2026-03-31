@@ -191,20 +191,5 @@ function forecast_secondary(
     _matrix_to_summary(mat, forecast_dates, CrIs)
 end
 
-function _summarise_secondary_gq(
-    fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}
-)
-    gqs = fit.generated_quantities
-    n_samples = length(gqs)
-    n_times = length(first(gqs).expected)
-    n_dates = min(n_times, length(dates))
-
-    mat = Matrix{Float64}(undef, n_dates, n_samples)
-    for (i, gq) in enumerate(gqs)
-        for t in 1:n_dates
-            mat[t, i] = Float64(gq.expected[t])
-        end
-    end
-
-    _matrix_to_summary(mat, dates[1:n_dates], CrIs)
-end
+_summarise_secondary_gq(fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}) =
+    _summarise_gq(fit, :expected, dates, CrIs)

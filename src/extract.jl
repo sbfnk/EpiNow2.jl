@@ -116,6 +116,8 @@ function get_predictions(
     elseif format == :quantile
         samples = get_samples(result; variable=:reports)
         return _samples_to_quantiles(samples, CrIs)
+    else
+        throw(ArgumentError("Unknown format: $format. Use :summary, :sample, or :quantile"))
     end
 end
 
@@ -217,32 +219,21 @@ end
 function _matrix_to_summary(
     mat::Matrix{Float64}, dates::Vector{Date}, CrIs::Vector{Float64}
 )
-    n = size(mat, 1)
-    rows = Vector{NamedTuple}(undef, n)
-
-    for t in 1:n
-        vals = mat[t, :]
-        row = (
-            date = dates[t],
-            mean = mean(vals),
-            median = median(vals),
-            sd = std(vals)
-        )
-
-        # Add CrI columns
-        for cri in CrIs
-            lo = quantile(vals, (1 - cri) / 2)
-            hi = quantile(vals, (1 + cri) / 2)
-            pct = round(Int, cri * 100)
-            row = merge(row, NamedTuple{(
-                Symbol("lower_$pct"), Symbol("upper_$pct")
-            )}((lo, hi)))
-        end
-
-        rows[t] = row
+    base = (
+        date = dates,
+        mean = vec(mean(mat; dims=2)),
+        median = vec(mapslices(median, mat; dims=2)),
+        sd = vec(mapslices(std, mat; dims=2))
+    )
+    cri_cols = NamedTuple()
+    for cri in CrIs
+        pct = round(Int, cri * 100)
+        lo = vec(mapslices(v -> quantile(v, (1 - cri) / 2), mat; dims=2))
+        hi = vec(mapslices(v -> quantile(v, (1 + cri) / 2), mat; dims=2))
+        cri_cols = merge(cri_cols,
+            NamedTuple{(Symbol("lower_$pct"), Symbol("upper_$pct"))}((lo, hi)))
     end
-
-    DataFrame(rows)
+    DataFrame(merge(base, cri_cols))
 end
 
 function _compute_growth_rate(

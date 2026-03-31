@@ -2,8 +2,6 @@
 #
 # CairoMakie-based plotting for EpiNow2 results.
 
-using CairoMakie
-
 # ── Comma-formatted tick labels ──────────────────────────────────────────
 
 function _comma_format(x::Real)

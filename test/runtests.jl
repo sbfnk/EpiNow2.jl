@@ -401,12 +401,12 @@ using Random
     @testset "_R_to_r convergence guard" begin
         gt_pmf = [0.3, 0.4, 0.2, 0.1]
         # Normal case should converge
-        r = EpiNow2._R_to_r(1.5, gt_pmf)
+        r = R_to_growth(1.5, gt_pmf)
         @test isfinite(r)
         @test r > 0
 
         # R=1 should give r≈0
-        r1 = EpiNow2._R_to_r(1.0, gt_pmf)
+        r1 = R_to_growth(1.0, gt_pmf)
         @test abs(r1) < 0.01
     end
 
