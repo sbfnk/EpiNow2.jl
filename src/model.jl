@@ -291,11 +291,10 @@ Generative process:
         for (ci, ud) in enumerate(gt_uncertain)
             ud_params = Vector{Real}(undef, length(ud.param_priors))
             for (i, prior) in enumerate(ud.param_priors)
-                if delay_prior_weight ≈ 1.0
-                    ud_params[i] ~ prior
-                else
-                    ud_params[i] ~ Flat()
-                    Turing.@addlogprob! delay_prior_weight * logpdf(prior, ud_params[i])
+                ud_params[i] ~ prior
+                if !(delay_prior_weight ≈ 1.0)
+                    # Scale prior contribution: add (weight-1)*logpdf to get weight*logpdf total
+                    Turing.@addlogprob! (delay_prior_weight - 1.0) * logpdf(prior, ud_params[i])
                 end
             end
             gt_pmfs[ci] = discretise_ad(
@@ -311,11 +310,9 @@ Generative process:
         for (ci, ud) in enumerate(delay_uncertain)
             ud_params = Vector{Real}(undef, length(ud.param_priors))
             for (i, prior) in enumerate(ud.param_priors)
-                if delay_prior_weight ≈ 1.0
-                    ud_params[i] ~ prior
-                else
-                    ud_params[i] ~ Flat()
-                    Turing.@addlogprob! delay_prior_weight * logpdf(prior, ud_params[i])
+                ud_params[i] ~ prior
+                if !(delay_prior_weight ≈ 1.0)
+                    Turing.@addlogprob! (delay_prior_weight - 1.0) * logpdf(prior, ud_params[i])
                 end
             end
             delay_pmfs[ci] = discretise_ad(
