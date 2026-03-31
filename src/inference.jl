@@ -20,25 +20,20 @@ function run_inference(model, metadata, opts::InferenceOpts)
 end
 
 function _sample(model, opts::InferenceOpts)
-    if !isnothing(opts.seed)
-        Random.seed!(opts.seed)
-    end
+    rng = isnothing(opts.seed) ? Random.default_rng() : Random.Xoshiro(opts.seed)
     sampler = _make_sampler(opts)
 
     if opts.sampler == :nuts
-        init = Turing.DynamicPPL.InitFromPrior()
         if opts.chains > 1
             Turing.sample(
-                model, sampler, MCMCThreads(),
+                rng, model, sampler, MCMCThreads(),
                 opts.samples, opts.chains;
-                discard_initial=0, progress=opts.progress,
-                initial_params=fill(init, opts.chains)
+                discard_initial=0, progress=opts.progress
             )
         else
             Turing.sample(
-                model, sampler, opts.samples;
-                discard_initial=0, progress=opts.progress,
-                initial_params=init
+                rng, model, sampler, opts.samples;
+                discard_initial=0, progress=opts.progress
             )
         end
     else  # :advi
@@ -53,10 +48,10 @@ Container for inference results. Holds the MCMC chain, generated
 quantities (infections, R, reports from model return values), and
 metadata for date mapping.
 """
-struct EpiNow2Fit
+struct EpiNow2Fit{M, G}
     chain::MCMCChains.Chains
-    generated_quantities::Vector
-    metadata::Any
+    generated_quantities::Vector{G}
+    metadata::M
 end
 
 # ── Sampler construction ─────────────────────────────────────────────────

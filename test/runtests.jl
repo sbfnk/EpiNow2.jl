@@ -302,7 +302,7 @@ using Random
         result = estimate_truncation(
             snapshots;
             inference = inference_opts(
-                samples=100, warmup=100, chains=1, progress=false
+                samples=100, warmup=100, chains=1, seed=42, progress=false
             ),
             verbose=false
         )
@@ -398,9 +398,9 @@ using Random
         @test all(result.secondary .>= 0)
     end
 
-    @testset "_R_to_r convergence guard" begin
+    @testset "R_to_growth / growth_to_R" begin
         gt_pmf = [0.3, 0.4, 0.2, 0.1]
-        # Normal case should converge
+        # Normal case
         r = R_to_growth(1.5, gt_pmf)
         @test isfinite(r)
         @test r > 0
@@ -408,6 +408,10 @@ using Random
         # R=1 should give r≈0
         r1 = R_to_growth(1.0, gt_pmf)
         @test abs(r1) < 0.01
+
+        # Round-trip: R → r → R
+        R_back = growth_to_R(r, gt_pmf)
+        @test R_back ≈ 1.5 atol=0.05
     end
 
     @testset "error paths" begin

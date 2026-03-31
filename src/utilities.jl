@@ -4,12 +4,9 @@
     growth_to_R(r, gt_pmf)
 
 Convert exponential growth rate r to reproduction number R.
-R = 1 / Σ_k pmf[k] * exp(-r*k).
+R = 1 / G(r) where G is the negative MGF of the generation interval.
 """
-function growth_to_R(r, gt_pmf)
-    n = length(gt_pmf)
-    1.0 / sum(gt_pmf[i] * exp(-r * i) for i in 1:n)
-end
+growth_to_R(r, gt_pmf) = 1.0 / _neg_mgf(r, gt_pmf)
 
 """
     map_prob_change(prob_decrease)
@@ -94,7 +91,7 @@ function simulate_infections(
 
     # Seeding
     seeding_time = max(gt_len - 1, 1)
-    growth = _R_to_r(R_vals[1], gt_pmf)
+    growth = R_to_growth(R_vals[1], gt_pmf)
     initial = [initial_infections * exp(growth * (s - seeding_time))
                for s in 1:seeding_time]
 

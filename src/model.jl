@@ -972,23 +972,36 @@ function _drop_zero_delay(pmf::AbstractVector)
 end
 
 """
-    R_to_growth(R, gt_pmf; tol=1e-3)
+    _neg_mgf(r, w)
 
-Convert reproduction number R to exponential growth rate r using
-Newton's method. Solves R * Σ_k pmf[k] * exp(-r*k) = 1.
+Negative moment generating function of the generation interval: Σ w[i] * exp(-r*i).
 """
-function R_to_growth(R, gt_pmf; tol=1e-3, max_iter=100)
+_neg_mgf(r, w) = sum(w[i] * exp(-r * i) for i in eachindex(w))
+
+"""
+    _dneg_mgf_dr(r, w)
+
+Derivative of the negative MGF w.r.t. r.
+"""
+_dneg_mgf_dr(r, w) = -sum(w[i] * i * exp(-r * i) for i in eachindex(w))
+
+"""
+    R_to_growth(R, gt_pmf; newton_steps=2)
+
+Convert reproduction number R to exponential growth rate r.
+Solves G(r) = 1/R where G is the negative MGF of the generation interval.
+
+Uses a fixed number of Newton steps (default 2), which is AD-safe since the
+loop count is deterministic. Based on the approach in EpiAware.jl.
+"""
+function R_to_growth(R, gt_pmf; newton_steps::Int=2)
     n = length(gt_pmf)
-    k_series = collect(1.0:n)
-    mean_gt = sum(gt_pmf[i] * k_series[i] for i in 1:n)
-    r = max((R - 1) / (R * mean_gt), -1.0)
-    for _ in 1:max_iter
-        exp_r = exp.(-r .* k_series)
-        num = R * sum(gt_pmf .* exp_r) - 1.0
-        den = -R * sum(gt_pmf .* k_series .* exp_r)
-        step = num / den
-        r -= step
-        abs(step) <= tol && return r
+    mean_gt = sum(gt_pmf[i] * i for i in 1:n)
+    # Small-r approximation as initial guess
+    r = (R - 1) / (R * mean_gt)
+    # Fixed Newton steps (AD-safe: deterministic loop count)
+    for _ in 1:newton_steps
+        r -= (R * _neg_mgf(r, gt_pmf) - 1) / (R * _dneg_mgf_dr(r, gt_pmf))
     end
     r
 end

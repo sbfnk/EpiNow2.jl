@@ -69,32 +69,22 @@ end
 
 # ── Show methods (matching R's tree format) ──────────────────────────────
 
-function _dist_family(d::Distribution)
-    d isa LogNormal && return "lognormal"
-    d isa Gamma && return "gamma"
-    d isa Normal && return "normal"
-    d isa Dirac && return "fixed"
-    d isa Truncated && return _dist_family(d.untruncated)
-    lowercase(string(typeof(d).name.name))
-end
+_dist_family(::LogNormal) = "lognormal"
+_dist_family(::Gamma) = "gamma"
+_dist_family(::Normal) = "normal"
+_dist_family(::Dirac) = "fixed"
+_dist_family(d::Truncated) = _dist_family(d.untruncated)
+_dist_family(d::Distribution) = lowercase(string(typeof(d).name.name))
 
-function _dist_name(d::Distribution)
-    replace(string(typeof(d).name.name), r"\{.*\}" => "")
-end
+_param_names(::LogNormal) = ["meanlog", "sdlog"]
+_param_names(::Gamma) = ["shape", "rate"]
+_param_names(::Normal) = ["mean", "sd"]
+_param_names(d::Distribution) = ["param_$i" for i in 1:length(params(d))]
 
-function _param_names(d::Distribution)
-    d isa LogNormal && return ["meanlog", "sdlog"]
-    d isa Gamma && return ["shape", "rate"]
-    d isa Normal && return ["mean", "sd"]
-    ["param_$i" for i in 1:length(params(d))]
-end
-
-function _param_values(d::Distribution)
-    d isa LogNormal && return [d.μ, d.σ]
-    d isa Gamma && return [shape(d), 1 / scale(d)]
-    d isa Normal && return [d.μ, d.σ]
-    collect(params(d))
-end
+_param_values(d::LogNormal) = [d.μ, d.σ]
+_param_values(d::Gamma) = [shape(d), 1 / scale(d)]
+_param_values(d::Normal) = [d.μ, d.σ]
+_param_values(d::Distribution) = collect(params(d))
 
 """Print a delay distribution in R's indented tree format."""
 function _show_tree(io::IO, d::Distribution; indent=0)

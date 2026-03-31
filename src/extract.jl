@@ -284,7 +284,7 @@ end
 
 function _snapshot_summary(result, date, CrIs)
     # Filter summaries to target date
-    rows = []
+    rows = NamedTuple[]
     for (name, df) in [
         (:infections, result.infections),
         (:rt, result.rt),

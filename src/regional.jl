@@ -1,5 +1,10 @@
 # ── Multi-region estimation ───────────────────────────────────────────────
 
+struct RegionalEpinowResult
+    regional::Dict{String, Union{EpinowResult, Exception}}
+    timings::Dict{String, Float64}
+end
+
 """
     regional_epinow(data; ..., kwargs...)
 
@@ -102,15 +107,10 @@ function regional_epinow(
     RegionalEpinowResult(results, timings)
 end
 
-struct RegionalEpinowResult
-    regional::Dict{String, Union{EpinowResult, Exception}}
-    timings::Dict{String, Float64}
-end
-
 function Base.summary(result::RegionalEpinowResult)
     # Cross-region summary: latest Rt, cases, growth rate per region
     # Includes probability of decrease and change category
-    rows = []
+    rows = DataFrame[]
     for (region, res) in result.regional
         res isa Exception && continue
         s = summary(res.estimates; type=:snapshot)
