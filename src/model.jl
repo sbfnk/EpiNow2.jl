@@ -971,6 +971,10 @@ function _drop_zero_delay(pmf::AbstractVector)
     stripped ./ sum(stripped)
 end
 
+# R_to_growth and supporting functions adapted from EpiAware.jl
+# (CDCgov/Rt-without-renewal), licensed under Apache License 2.0.
+# See: https://github.com/CDCgov/Rt-without-renewal
+
 """
     _neg_mgf(r, w)
 
