@@ -73,7 +73,7 @@ function simulate_infections(
     R_trajectory::DataFrame;
     generation_time::GTOpts = gt_opts(LogNormal(1.6, 0.5)),
     delays::DelayOpts = delay_opts(),
-    obs::ObsOpts = obs_opts(family=:poisson),
+    obs::ObsOpts = obs_opts(family=poisson),
     initial_infections::Float64 = 100.0,
     pop::Float64 = 0.0,
     seed::Union{Int, Nothing} = nothing
@@ -123,7 +123,7 @@ function simulate_infections(
     expected_reports = all_reports[(seeding_time + 1):end]
 
     # Sample observations
-    reports = if obs.family == :negbin
+    reports = if obs.family == negbin
         [max(0, rand(NegativeBinomial2(max(r, 1e-6), 5.0)))
          for r in expected_reports]
     else

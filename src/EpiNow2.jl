@@ -22,7 +22,6 @@ plot(result)
 module EpiNow2
 
 using CSV
-using CairoMakie
 using CensoredDistributions
 using Dates
 using DataFrames
@@ -38,6 +37,16 @@ using Turing
 export NonParametricDist, UncertainDistribution, DelayDistribution,
        CompositeDelay
 export discretise, convolve_pmfs
+
+# ── Enums ──────────────────────────────────────────────────────────────
+export GPKernel, matern, se, periodic
+export ObsFamily, negbin, poisson
+export ForecastMode, latest, project, estimate
+export GPTarget, gp_Rt, gp_R0
+export PopPeriod, pop_forecast, pop_all
+export BackcalcPrior, bc_infections, bc_none, bc_growth_rate
+export InferenceSampler, nuts
+export SecondaryType, incidence, prevalence
 
 # ── Options ─────────────────────────────────────────────────────────────
 export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
@@ -57,11 +66,7 @@ export get_samples, get_predictions, get_parameters, get_imputed_reports
 export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
        simulate_infections, forecast_infections, opts_list,
        estimate_dist, bootstrapped_dist_fit,
-       get_regional_results, report_plots, plot_summary
-
-# ── Re-export Makie functions so plotting works without extra imports ───
-using CairoMakie: save as save_figure
-export plot, save_figure
+       get_regional_results
 
 include("distributions.jl")
 include("options.jl")
@@ -74,6 +79,10 @@ include("secondary.jl")
 include("truncation.jl")
 include("regional.jl")
 include("utilities.jl")
-include("plotting.jl")
+
+# Stubs for plotting functions (implemented by CairoMakie extension)
+function report_plots end
+function plot_summary end
+export report_plots, plot_summary
 
 end # module

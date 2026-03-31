@@ -23,21 +23,17 @@ function _sample(model, opts::InferenceOpts)
     rng = isnothing(opts.seed) ? Random.default_rng() : Random.Xoshiro(opts.seed)
     sampler = _make_sampler(opts)
 
-    if opts.sampler == :nuts
-        if opts.chains > 1
-            Turing.sample(
-                rng, model, sampler, MCMCThreads(),
-                opts.samples, opts.chains;
-                discard_initial=0, progress=opts.progress
-            )
-        else
-            Turing.sample(
-                rng, model, sampler, opts.samples;
-                discard_initial=0, progress=opts.progress
-            )
-        end
-    else  # :advi
-        error("ADVI sampler is not yet supported. Use :nuts instead.")
+    if opts.chains > 1
+        Turing.sample(
+            rng, model, sampler, MCMCThreads(),
+            opts.samples, opts.chains;
+            discard_initial=0, progress=opts.progress
+        )
+    else
+        Turing.sample(
+            rng, model, sampler, opts.samples;
+            discard_initial=0, progress=opts.progress
+        )
     end
 end
 
@@ -57,16 +53,10 @@ end
 # ── Sampler construction ─────────────────────────────────────────────────
 
 function _make_sampler(opts::InferenceOpts)
-    if opts.sampler == :nuts
-        Turing.NUTS(
-            opts.warmup,
-            opts.target_acceptance;
-            max_depth=opts.max_treedepth
-        )
-    elseif opts.sampler == :advi
-        error("ADVI sampler is not yet supported. Use :nuts instead.")
-    else
-        error("Unknown sampler: $(opts.sampler)")
-    end
+    Turing.NUTS(
+        opts.warmup,
+        opts.target_acceptance;
+        max_depth=opts.max_treedepth
+    )
 end
 

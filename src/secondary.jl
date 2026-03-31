@@ -103,7 +103,7 @@ A `DataFrame` with `:date`, `:primary`, and `:secondary` columns.
 function simulate_secondary(
     primary::DataFrame;
     delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
-    obs::ObsOpts = obs_opts(family=:poisson),
+    obs::ObsOpts = obs_opts(family=poisson),
     secondary::SecondaryOpts = secondary_opts(),
     frac::Float64 = 0.1
 )
@@ -115,7 +115,7 @@ function simulate_secondary(
     scaled = frac .* Float64.(prim)
     expected = convolve(scaled, delay_pmf)
 
-    if secondary.type == :prevalence
+    if secondary.type == prevalence
         expected = cumsum(expected)
     end
 
@@ -179,7 +179,7 @@ function forecast_secondary(
         scaled = frac_i .* primary_vec
         expected = convolve(scaled, delay_pmf)
 
-        if secondary.type == :prevalence
+        if secondary.type == prevalence
             expected = cumsum(expected)
         end
 

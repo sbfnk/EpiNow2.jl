@@ -82,7 +82,7 @@ using Random
         @test size(basis) == (30, 5)
 
         # HSGP coefficients
-        spd = EpiNow2.hsgp_coefficients(5, 1.5, 0.1, 0.5, :matern, 1.5)
+        spd = EpiNow2.hsgp_coefficients(5, 1.5, 0.1, 0.5, matern, 1.5)
         @test length(spd) == 5
         @test all(isfinite.(spd))
 
@@ -422,9 +422,8 @@ using Random
         # Invalid PMF
         @test_throws ArgumentError NonParametricDist([0.5, 0.3])  # doesn't sum to 1
 
-        # ADVI not supported
-        @test_throws ErrorException inference_opts(sampler=:advi)  |>
-            opts -> EpiNow2._make_sampler(opts)
+        # Only nuts sampler is supported — invalid symbols throw MethodError
+        @test_throws MethodError inference_opts(sampler=:advi)
     end
 
     @testset "CrIs parameter passthrough" begin

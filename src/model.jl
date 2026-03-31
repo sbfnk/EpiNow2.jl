@@ -173,11 +173,11 @@ kernel-specific closed forms matching Stan.
 """
 function hsgp_coefficients(
     n_basis::Int, boundary::Float64,
-    alpha, rho, kernel::Symbol, matern_order::Float64
+    alpha, rho, kernel::GPKernel, matern_order::Float64
 )
-    if kernel == :se
+    if kernel == se
         diagSPD_EQ(alpha, rho, boundary, n_basis)
-    elseif kernel == :matern
+    elseif kernel == matern
         if matern_order ≈ 0.5
             diagSPD_Matern12(alpha, rho, boundary, n_basis)
         elseif matern_order ≈ 1.5
@@ -187,10 +187,8 @@ function hsgp_coefficients(
         else
             error("Unsupported Matérn order: $matern_order. Use 0.5, 1.5, or 2.5")
         end
-    elseif kernel == :periodic
+    elseif kernel == periodic
         diagSPD_Periodic(alpha, rho, n_basis)
-    else
-        error("Unknown kernel: $kernel")
     end
 end
 
@@ -241,23 +239,23 @@ Generative process:
     use_gp::Bool,
     gp_n_basis::Int,
     gp_boundary::Float64,
-    gp_kernel::Symbol,
+    gp_kernel::GPKernel,
     gp_matern_order::Float64,
-    gp_on::Symbol,
+    gp_on::GPTarget,
     n_noise_terms::Int,
     use_rw::Bool,
     rw_period::Int,
     use_week_effect::Bool,
     week_length::Int,
     start_day::Int,
-    obs_family::Symbol,
+    obs_family::ObsFamily,
     use_obs_scale::Bool,
     # Accumulation
     accumulate::AbstractVector{Bool},
     # Population adjustment
     pop::Float64,
     pop_prior::Union{Distribution, Nothing},
-    pop_period::Symbol,
+    pop_period::PopPeriod,
     pop_floor::Float64,
     n_non_horizon::Int,
     # Priors (passed from options)
@@ -279,7 +277,7 @@ Generative process:
     bps::AbstractVector{Int},
     # Back-calculation
     shifted_cases::Union{AbstractVector{Float64}, Nothing},
-    backcalc_prior::Symbol,
+    backcalc_prior::BackcalcPrior,
     # Prior weighting (1/n_obs when weight_prior=true)
     delay_prior_weight::Float64
 )
@@ -358,7 +356,7 @@ Generative process:
         rescaled_rho = 2.0 * gp_rho / n_noise_terms
 
         # Periodic kernel uses 2*n_basis terms (cos + sin components)
-        n_gp_terms = gp_kernel == :periodic ? 2 * gp_n_basis : gp_n_basis
+        n_gp_terms = gp_kernel == periodic ? 2 * gp_n_basis : gp_n_basis
         gp_z ~ filldist(Normal(0.0, 1.0), n_gp_terms)
 
         spd_weights = hsgp_coefficients(
@@ -367,7 +365,7 @@ Generative process:
         )
         gp_f = hsgp_basis_matrix * (spd_weights .* gp_z)
 
-        if gp_on == :R0
+        if gp_on == gp_R0
             # Stationary: GP values added directly, extend last value
             gp_full = if length(gp_f) < total_times
                 vcat(gp_f, fill(gp_f[end], total_times - length(gp_f)))
@@ -431,8 +429,8 @@ Generative process:
                     all_infections[t - j] * gt_pmf[j]
                     for j in 1:min(t - 1, gt_len)
                 )
-                use_pop = (pop_period == :all) ||
-                          (pop_period == :forecast && s > n_non_horizon)
+                use_pop = (pop_period == pop_all) ||
+                          (pop_period == pop_forecast && s > n_non_horizon)
                 if use_pop
                     susceptible = max(pop_floor, pop - cum_inf)
                     exp_adj = exp(-R[s] * infectiousness / susceptible)
@@ -457,7 +455,7 @@ Generative process:
             gp_alpha ~ truncated(gp_alpha_prior; lower=0.0)
             gp_rho ~ truncated(gp_ls_prior; lower=0.0)
             rescaled_rho = 2.0 * gp_rho / n_noise_terms
-            n_gp_terms = gp_kernel == :periodic ? 2 * gp_n_basis : gp_n_basis
+            n_gp_terms = gp_kernel == periodic ? 2 * gp_n_basis : gp_n_basis
             gp_z ~ filldist(Normal(0.0, 1.0), n_gp_terms)
             spd_weights = hsgp_coefficients(
                 gp_n_basis, gp_boundary,
@@ -470,13 +468,13 @@ Generative process:
 
         exp_noise = exp.(noise)
 
-        infections = if backcalc_prior == :infections
+        infections = if backcalc_prior == bc_infections
             # Multiplicative correction: infections = shifted_cases * exp(noise)
             [max(shifted_cases[t] * exp_noise[t], 1e-5) for t in 1:total_times]
-        elseif backcalc_prior == :none
+        elseif backcalc_prior == bc_none
             # Pure GP: infections = exp(noise)
             [max(exp_noise[t], 1e-5) for t in 1:total_times]
-        elseif backcalc_prior == :growth_rate
+        elseif backcalc_prior == bc_growth_rate
             # Random walk: infections[t] = infections[t-1] * exp(noise[t])
             inf_rw = Vector{eltype(exp_noise)}(undef, total_times)
             inf_rw[1] = max(shifted_cases[1] * exp_noise[1], 1e-5)
@@ -567,7 +565,7 @@ Generative process:
     end
 
     # ── Likelihood ───────────────────────────────────────────────────
-    if obs_family == :negbin
+    if obs_family == negbin
         reporting_overdispersion ~ truncated(
             obs_dispersion_prior; lower=0.0
         )
@@ -576,7 +574,7 @@ Generative process:
             μ = max(expected_reports[t], 1e-6)
             Turing.@addlogprob! obs_weight * _negbin2_logpmf(cases[t], μ, φ)
         end
-    else  # :poisson
+    else  # poisson
         for t in 1:n_times
             μ = max(expected_reports[t], 1e-6)
             Turing.@addlogprob! obs_weight * logpdf(Poisson(μ), cases[t])
@@ -626,7 +624,7 @@ end
     delay_pmf::AbstractVector{Float64},
     n_obs::Int,
     burn_in::Int,
-    obs_family::Symbol,
+    obs_family::ObsFamily,
     # Secondary model structure flags
     cumulative::Bool,
     historic::Bool,
@@ -681,7 +679,7 @@ end
         )
     end
 
-    if obs_family == :negbin
+    if obs_family == negbin
         overdispersion ~ truncated(Normal(0.0, 0.25); lower=0.0)
         φ = 1.0 / overdispersion^2
         for t in 1:n_obs
@@ -807,8 +805,8 @@ function assemble_model(
 
     # GP configuration
     use_gp = gp.basis_prop > 0 && (rt.use_rt ? rt.rw == 0 : true)
-    stationary = rt.gp_on == :R0
-    future_fixed = rt.future in (:latest, :estimate)
+    stationary = rt.gp_on == gp_R0
+    future_fixed = rt.future in (latest, estimate)
     # Number of GP noise terms (matches Stan's setup_noise)
     noise_terms = if !use_gp
         0
@@ -826,7 +824,7 @@ function assemble_model(
     # Periodic kernel uses cos/sin basis (2*n_basis columns)
     basis_matrix = if !use_gp
         nothing
-    elseif gp.kernel == :periodic
+    elseif gp.kernel == periodic
         hsgp_periodic_basis(gp_n_basis, gp.w0, noise_terms)
     else
         hsgp_basis(gp_n_basis, gp_boundary, noise_terms)

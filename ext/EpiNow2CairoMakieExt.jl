@@ -1,6 +1,14 @@
-# ── Plotting ──────────────────────────────────────────────────────────────
-#
-# CairoMakie-based plotting for EpiNow2 results.
+module EpiNow2CairoMakieExt
+
+using CairoMakie
+using Dates
+using DataFrames
+using Distributions
+using Statistics
+
+using EpiNow2
+using EpiNow2: _dist_family, _convolve_pmfs,
+               EstimateInfectionsResult, EpinowResult, EpiData
 
 # ── Comma-formatted tick labels ──────────────────────────────────────────
 
@@ -19,13 +27,6 @@ end
 
 # ── Distribution plots ────────────────────────────────────────────────────
 
-"""
-    plot(d::DelayDistribution; n_samples=50)
-
-Plot a delay distribution. For fixed distributions, shows the discretised
-PMF as a step function. For uncertain distributions, draws `n_samples`
-realisations from the prior and shows the spread.
-"""
 function CairoMakie.Makie.plot(d::Distribution; max::Union{Int, Nothing}=nothing)
     _plot_pmf(discretise(d; max=max))
 end
@@ -106,17 +107,6 @@ end
 
 # ── Result plots ─────────────────────────────────────────────────────────
 
-"""
-    plot(result::EstimateInfectionsResult; kwargs...)
-
-Plot infections, reported cases, and Rt from an `estimate_infections` result.
-Returns a Makie `Figure`.
-
-# Keyword arguments
-- `CrI::Float64=0.9` — credible interval level for the outer ribbon
-- `forecast_date::Union{Date, Nothing}=nothing` — vertical line at forecast start
-  (defaults to last observation date)
-"""
 function CairoMakie.Makie.plot(
     result::EstimateInfectionsResult;
     CrI::Float64=0.9,
@@ -138,7 +128,7 @@ function CairoMakie.Makie.plot(
 end
 
 function CairoMakie.Makie.plot(result::EpinowResult; kwargs...)
-    plot(result.estimates; kwargs...)
+    CairoMakie.Makie.plot(result.estimates; kwargs...)
 end
 
 function _plot_panel!(
@@ -207,13 +197,7 @@ end
 
 # ── Reporting utilities ──────────────────────────────────────────────────
 
-"""
-    report_plots(result; CrI=0.9)
-
-Generate a complete set of reporting plots: infections, reports, Rt,
-and growth rate. Returns a Dict of Figures keyed by name.
-"""
-function report_plots(
+function EpiNow2.report_plots(
     result::EstimateInfectionsResult;
     CrI::Float64=0.9,
     forecast_date::Union{Date, Nothing}=nothing
@@ -239,16 +223,10 @@ function report_plots(
     plots
 end
 
-report_plots(result::EpinowResult; kwargs...) =
-    report_plots(result.estimates; kwargs...)
+EpiNow2.report_plots(result::EpinowResult; kwargs...) =
+    EpiNow2.report_plots(result.estimates; kwargs...)
 
-"""
-    plot_summary(result; CrI=0.9)
-
-Generate a summary plot with Rt and cases side-by-side.
-Returns a Makie `Figure`.
-"""
-function plot_summary(
+function EpiNow2.plot_summary(
     result::EstimateInfectionsResult;
     CrI::Float64=0.9,
     forecast_date::Union{Date, Nothing}=nothing
@@ -268,5 +246,7 @@ function plot_summary(
     fig
 end
 
-plot_summary(result::EpinowResult; kwargs...) =
-    plot_summary(result.estimates; kwargs...)
+EpiNow2.plot_summary(result::EpinowResult; kwargs...) =
+    EpiNow2.plot_summary(result.estimates; kwargs...)
+
+end # module

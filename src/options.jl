@@ -3,6 +3,16 @@
 # Each mirrors an EpiNow2 *_opts() function. These are plain structs with
 # keyword constructors and sensible defaults.
 
+# ── Enums for type-safe option values ────────────────────────────────────
+
+@enum GPKernel matern se periodic
+@enum ObsFamily negbin poisson
+@enum ForecastMode latest project estimate
+@enum GPTarget gp_Rt gp_R0
+@enum PopPeriod pop_forecast pop_all
+@enum BackcalcPrior bc_infections bc_none bc_growth_rate
+@enum InferenceSampler nuts
+
 # ── Generation time ──────────────────────────────────────────────────────
 
 """
@@ -66,33 +76,24 @@ Options for time-varying reproduction number estimation.
 - `prior`: Prior on initial Rt (default: LogNormal(mean=1, sd=1))
 - `use_rt`: Whether to use Rt model vs back-calculation (default: true)
 - `rw`: Random walk period in days (0=none, 7=weekly) (default: 0)
-- `future`: How to handle Rt in forecast: `:latest` (hold constant), `:project` (extend GP), `:estimate` (fix from `fixed_from` days before end) (default: `:latest`)
-- `fixed_from`: Days before end to fix Rt when `future=:estimate` (default: 0)
-- `gp_on`: Apply GP to `:Rt_minus_1` or `:R0` (default: `:Rt_minus_1`)
+- `future`: How to handle Rt in forecast: `latest` (hold constant), `project` (extend GP), `estimate` (fix from `fixed_from` days before end) (default: `latest`)
+- `fixed_from`: Days before end to fix Rt when `future=estimate` (default: 0)
+- `gp_on`: Apply GP to `gp_Rt` (non-stationary) or `gp_R0` (stationary) (default: `gp_Rt`)
 - `pop`: Susceptible population for depletion adjustment (default: 0=none)
 """
-Base.@kwdef struct RtOpts
+Base.@kwdef struct RtOpts{P<:Union{Float64, Distribution}}
     prior::Distribution = LogNormal(_moments_to_lognormal(1.0, 1.0)...)
     use_rt::Bool = true
     rw::Int = 0
-    future::Symbol = :latest
+    future::ForecastMode = latest
     fixed_from::Int = 0
-    gp_on::Symbol = :Rt_minus_1
-    pop::Union{Float64, Distribution} = 0.0
-    pop_period::Symbol = :forecast
+    gp_on::GPTarget = gp_Rt
+    pop::P = 0.0
+    pop_period::PopPeriod = pop_forecast
     pop_floor::Float64 = 1.0
 end
 
-function rt_opts(; kwargs...)
-    opts = RtOpts(; kwargs...)
-    opts.future in (:latest, :project, :estimate) ||
-        throw(ArgumentError("future must be :latest, :project, or :estimate, got :$(opts.future)"))
-    opts.gp_on in (:Rt_minus_1, :R0) ||
-        throw(ArgumentError("gp_on must be :Rt_minus_1 or :R0, got :$(opts.gp_on)"))
-    opts.pop_period in (:forecast, :all) ||
-        throw(ArgumentError("pop_period must be :forecast or :all, got :$(opts.pop_period)"))
-    opts
-end
+rt_opts(; kwargs...) = RtOpts(; kwargs...)
 
 # ── Gaussian process ─────────────────────────────────────────────────────
 
@@ -107,7 +108,7 @@ Base.@kwdef struct GPOpts
     boundary_scale::Float64 = 1.5
     ls::Distribution = truncated(LogNormal(_moments_to_lognormal(21.0, 7.0)...); upper=60.0)
     alpha::Distribution = Normal(0.0, 0.01)
-    kernel::Symbol = :matern
+    kernel::GPKernel = matern
     matern_order::Float64 = 1.5
     w0::Float64 = 1.0
 end
@@ -121,17 +122,17 @@ gp_opts(; kwargs...) = GPOpts(; kwargs...)
 
 Observation model options. Construct via `obs_opts()`.
 
-- `family`: `:negbin` or `:poisson`
+- `family`: `negbin` or `poisson` (from `ObsFamily` enum)
 - `week_effect`: day-of-week reporting effects (default: `true`)
 - `scale`: fraction observed, as a `Distribution` for a prior or `Float64` for fixed
 """
-Base.@kwdef struct ObsOpts
-    family::Symbol = :negbin
+Base.@kwdef struct ObsOpts{S<:Union{Float64, Distribution}}
+    family::ObsFamily = negbin
     dispersion::Distribution = Normal(0.0, 0.25)
     weight::Float64 = 1.0
     week_effect::Bool = true
     week_length::Int = 7
-    scale::Union{Float64, Distribution} = 1.0
+    scale::S = 1.0
     likelihood::Bool = true
 end
 
@@ -150,7 +151,7 @@ Back-calculation (deconvolution) options. Used when `rt_opts(use_rt=false)`.
 - `rt_window`: Smoothing window for post-hoc Rt (default: 1)
 """
 Base.@kwdef struct BackcalcOpts
-    prior::Symbol = :infections
+    prior::BackcalcPrior = bc_infections
     prior_window::Int = 14
     rt_window::Int = 1
 end
@@ -181,7 +182,7 @@ Options controlling the Turing.jl inference backend.
 Replaces EpiNow2's `stan_opts()`.
 """
 Base.@kwdef struct InferenceOpts
-    sampler::Symbol = :nuts
+    sampler::InferenceSampler = nuts
     samples::Int = 2000
     warmup::Int = 250
     chains::Int = 4
@@ -207,8 +208,10 @@ Secondary observation model options. Use `secondary_opts(:incidence)` or
 - `current`: include current primary
 - `primary_current_additive`: add (true) or subtract (false) current
 """
+@enum SecondaryType incidence prevalence
+
 Base.@kwdef struct SecondaryOpts
-    type::Symbol = :incidence
+    type::SecondaryType = incidence
     cumulative::Bool = false
     historic::Bool = true
     primary_hist_additive::Bool = true
@@ -216,16 +219,16 @@ Base.@kwdef struct SecondaryOpts
     primary_current_additive::Bool = false
 end
 
-function secondary_opts(type::Symbol=:incidence; kwargs...)
-    if type == :incidence
+function secondary_opts(type::SecondaryType=incidence; kwargs...)
+    if type == incidence
         SecondaryOpts(;
-            type=:incidence, cumulative=false, historic=true,
+            type=incidence, cumulative=false, historic=true,
             primary_hist_additive=true, current=false,
             primary_current_additive=false, kwargs...
         )
-    elseif type == :prevalence
+    elseif type == prevalence
         SecondaryOpts(;
-            type=:prevalence, cumulative=true, historic=true,
+            type=prevalence, cumulative=true, historic=true,
             primary_hist_additive=false, current=true,
             primary_current_additive=true, kwargs...
         )
@@ -260,8 +263,10 @@ function Base.show(io::IO, ::MIME"text/plain", o::RtOpts)
     o.rw > 0 && println(io, "  random walk period: $(o.rw)")
     println(io, "  gp_on: $(o.gp_on)")
     println(io, "  future: $(o.future)")
-    (o.pop isa Number ? o.pop > 0 : true) && println(io, "  population: $(o.pop)")
+    _has_pop(o) && println(io, "  population: $(o.pop)")
 end
+
+_has_pop(o::RtOpts) = o.pop isa Distribution || (o.pop isa Number && o.pop > 0)
 
 function Base.show(io::IO, ::MIME"text/plain", o::ObsOpts)
     println(io, "Observation model options:")
