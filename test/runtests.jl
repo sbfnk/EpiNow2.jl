@@ -426,6 +426,210 @@ using Random
         @test_throws MethodError inference_opts(sampler=:advi)
     end
 
+    # ── Helper: shared test data ─────────────────────────────────────
+    _test_data() = let
+        n = 30
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, n)
+        DataFrame(date=collect(dates),
+                  confirm=round.(Int, 100 .* exp.(0.05 .* (1:n))))
+    end
+
+    _fast_inference() = inference_opts(
+        samples=50, warmup=50, chains=1, seed=42, progress=false
+    )
+
+    # ── New feature tests ────────────────────────────────────────────
+
+    @testset "random walk mode" begin
+        result = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            rt = rt_opts(rw=7),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        @test result isa EpiNow2.EstimateInfectionsResult
+        @test nrow(result.rt) == 30
+    end
+
+    @testset "forecasting with future=project" begin
+        result = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            rt = rt_opts(future=project),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=7),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        @test nrow(result.rt) == 37  # 30 obs + 7 forecast
+    end
+
+    @testset "population depletion" begin
+        result = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            rt = rt_opts(pop=10000.0, pop_period=pop_all),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        @test result isa EpiNow2.EstimateInfectionsResult
+        @test all(result.infections.mean .> 0)
+    end
+
+    @testset "prior-predictive mode" begin
+        result = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false, likelihood=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        @test result isa EpiNow2.EstimateInfectionsResult
+    end
+
+    @testset "get_imputed_reports" begin
+        result = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        imputed = get_imputed_reports(result)
+        @test imputed isa DataFrame
+        @test :date in propertynames(imputed)
+        @test :mean in propertynames(imputed)
+        @test nrow(imputed) > 0
+        # Imputed reports should be non-negative integers on average
+        @test all(imputed.mean .>= 0)
+    end
+
+    @testset "simulate_infections" begin
+        n = 30
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, n)
+        R_traj = DataFrame(date=collect(dates), R=fill(1.2, n))
+
+        result = simulate_infections(
+            R_traj;
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(family=poisson),
+            seed = 42
+        )
+        @test result isa DataFrame
+        @test :infections in propertynames(result)
+        @test :reports in propertynames(result)
+        @test nrow(result) == n
+        @test all(result.infections .> 0)
+    end
+
+    @testset "estimate_dist and bootstrapped_dist_fit" begin
+        Random.seed!(42)
+        delays = rand(LogNormal(1.5, 0.5), 200)
+        data = DataFrame(delay=delays)
+
+        d = estimate_dist(data; family=:lognormal, max_delay=30)
+        @test d isa LogNormal
+        @test 1.0 < d.μ < 2.0
+
+        ud = bootstrapped_dist_fit(data; family=:lognormal, max_delay=30, n_bootstraps=20)
+        @test ud isa UncertainDistribution
+        @test length(ud.param_priors) == 2
+    end
+
+    @testset "map_prob_change" begin
+        @test map_prob_change(0.01) == "Increasing"
+        @test map_prob_change(0.2) == "Likely increasing"
+        @test map_prob_change(0.5) == "Stable"
+        @test map_prob_change(0.8) == "Likely decreasing"
+        @test map_prob_change(0.99) == "Decreasing"
+    end
+
+    @testset "example delay distributions" begin
+        @test example_generation_time() isa LogNormal
+        @test example_incubation_period() isa LogNormal
+        @test example_reporting_delay() isa LogNormal
+    end
+
+    @testset "enum types" begin
+        # Enums work as option values
+        @test rt_opts(future=latest).future == latest
+        @test rt_opts(future=project).future == project
+        @test rt_opts(gp_on=gp_R0).gp_on == gp_R0
+        @test gp_opts(kernel=se).kernel == se
+        @test obs_opts(family=poisson).family == poisson
+        @test secondary_opts(prevalence).type == prevalence
+
+        # Invalid symbols rejected
+        @test_throws MethodError rt_opts(future=:invalid)
+        @test_throws MethodError obs_opts(family=:invalid)
+    end
+
+    @testset "secondary prevalence mode" begin
+        Random.seed!(42)
+        n_days = 40
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, 1) + Day(n_days - 1)
+        cases = round.(Int, 100 .* exp.(0.03 .* (1:n_days)))
+        hosp = [max(1, round(Int, 0.05 * sum(cases[max(1,i-5):i]))) for i in 1:n_days]
+        data = DataFrame(date=collect(dates), primary=cases, secondary=hosp)
+
+        result = estimate_secondary(
+            data;
+            secondary = secondary_opts(prevalence),
+            delays = delay_opts(LogNormal(1.5, 0.5)),
+            obs = obs_opts(week_effect=false),
+            inference = _fast_inference(),
+            burn_in=10,
+            verbose=false
+        )
+        @test result isa EpiNow2.EstimateSecondaryResult
+        @test nrow(result.predictions) > 0
+    end
+
+    @testset "opts_list" begin
+        ol = opts_list(["A", "B", "C"], rt_opts(rw=7))
+        @test length(ol) == 3
+        @test ol["A"].rw == 7
+    end
+
+    @testset "get_predictions formats" begin
+        result = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        # :summary format
+        preds = get_predictions(result; format=:summary)
+        @test preds isa DataFrame
+
+        # :sample format
+        samp = get_predictions(result; format=:sample)
+        @test :sample in propertynames(samp)
+
+        # :quantile format
+        quant = get_predictions(result; format=:quantile)
+        @test quant isa DataFrame
+
+        # invalid format
+        @test_throws ArgumentError get_predictions(result; format=:invalid)
+    end
+
     @testset "CrIs parameter passthrough" begin
         Random.seed!(42)
 
