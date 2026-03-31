@@ -20,6 +20,9 @@ function run_inference(model, metadata, opts::InferenceOpts)
 end
 
 function _sample(model, opts::InferenceOpts)
+    if !isnothing(opts.seed)
+        Random.seed!(opts.seed)
+    end
     sampler = _make_sampler(opts)
 
     if opts.sampler == :nuts
@@ -38,8 +41,8 @@ function _sample(model, opts::InferenceOpts)
                 initial_params=init
             )
         end
-    else  # :advi — validated by _make_sampler
-        Turing.vi(model, sampler)
+    else  # :advi
+        error("ADVI sampler is not yet supported. Use :nuts instead.")
     end
 end
 
@@ -66,7 +69,7 @@ function _make_sampler(opts::InferenceOpts)
             max_depth=opts.max_treedepth
         )
     elseif opts.sampler == :advi
-        Turing.ADVI(10, 10_000)
+        error("ADVI sampler is not yet supported. Use :nuts instead.")
     else
         error("Unknown sampler: $(opts.sampler)")
     end

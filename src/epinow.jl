@@ -43,6 +43,7 @@ function estimate_infections(
     obs::ObsOpts = obs_opts(),
     forecast::ForecastOpts = forecast_opts(),
     inference::InferenceOpts = inference_opts(),
+    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
     verbose::Bool = true
 )
     epi_data = EpiData(data)
@@ -63,7 +64,7 @@ function estimate_infections(
 
     verbose && @info "Inference complete" seconds=round(elapsed, digits=1)
 
-    build_result(fit, epi_data, elapsed)
+    build_result(fit, epi_data, elapsed; CrIs)
 end
 
 """
@@ -102,7 +103,7 @@ function epinow(
     estimates = estimate_infections(
         data;
         generation_time, delays, truncation,
-        rt, backcalc, gp, obs, forecast, inference, verbose
+        rt, backcalc, gp, obs, forecast, inference, CrIs, verbose
     )
 
     elapsed = time() - t0
@@ -117,5 +118,19 @@ end
 
 function _save_results(result::EpinowResult, folder::String)
     mkpath(folder)
-    # TODO: CSV.write for each summary DataFrame, serialise fit
+    est = result.estimates
+    _write_csv(joinpath(folder, "infections.csv"), est.infections)
+    _write_csv(joinpath(folder, "reports.csv"), est.reports)
+    _write_csv(joinpath(folder, "rt.csv"), est.rt)
+    _write_csv(joinpath(folder, "growth_rate.csv"), est.growth_rate)
+end
+
+function _write_csv(path::String, df::DataFrame)
+    isempty(df) && return
+    open(path, "w") do io
+        println(io, join(names(df), ","))
+        for row in eachrow(df)
+            println(io, join([row[c] for c in names(df)], ","))
+        end
+    end
 end

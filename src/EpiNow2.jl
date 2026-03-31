@@ -28,7 +28,8 @@ using DataFrames
 using Distributions
 using LinearAlgebra
 using MCMCChains
-using SpecialFunctions: loggamma
+using Random
+using SpecialFunctions: loggamma, besseli
 using Statistics
 using Turing
 
@@ -44,10 +45,16 @@ export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
 # ── Main inference functions ────────────────────────────────────────────
 export epinow, estimate_infections, estimate_secondary,
        estimate_truncation, regional_epinow, example_confirmed,
-       simulate_secondary, forecast_secondary
+       simulate_secondary, forecast_secondary,
+       example_generation_time, example_incubation_period,
+       example_reporting_delay
 
 # ── Accessors ───────────────────────────────────────────────────────────
 export get_samples, get_predictions, get_parameters
+
+# ── Utilities ──────────────────────────────────────────────────────────
+export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
+       simulate_infections, opts_list
 
 # ── Re-export Makie functions so plotting works without extra imports ───
 using CairoMakie: save as save_figure
@@ -63,6 +70,7 @@ include("epinow.jl")
 include("secondary.jl")
 include("truncation.jl")
 include("regional.jl")
+include("utilities.jl")
 include("plotting.jl")
 
 end # module

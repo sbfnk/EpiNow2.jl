@@ -50,14 +50,25 @@ function estimate_secondary(
 
     verbose && @info "Estimating secondary observations..." type=secondary.type n_obs
 
+    start_day = Dates.dayofweek(sec_data.date[1])
+    frac_prior = obs.scale isa Distribution ? obs.scale : Beta(5.0, 5.0)
+
     model = secondary_model(
         sec_data.primary,
         sec_data.secondary[(burn_in + 1):end],
         delay_pmf,
         n_obs,
         burn_in,
-        secondary.type == :prevalence,
-        obs.family
+        obs.family,
+        secondary.cumulative,
+        secondary.historic,
+        secondary.primary_hist_additive,
+        secondary.current,
+        secondary.primary_current_additive,
+        obs.week_effect,
+        obs.week_length,
+        start_day,
+        frac_prior
     )
 
     metadata = SecondaryMetadata(sec_data.date, burn_in)
@@ -125,12 +136,16 @@ A `DataFrame` with secondary predictions for the forecast period.
 function forecast_secondary(
     sec_result::EstimateSecondaryResult,
     inf_result::EstimateInfectionsResult;
+    delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
+    secondary::SecondaryOpts = secondary_opts(),
     CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
 )
     # Extract posterior samples of frac from secondary fit
     sec_params = get_parameters(sec_result)
     frac_samples = sec_params[:frac]
     n_samples = length(frac_samples)
+
+    delay_pmf = discretise(delays.dist).pmf
 
     # Get primary forecast samples
     primary_samples = get_samples(inf_result; variable=:reports)
@@ -142,21 +157,34 @@ function forecast_secondary(
     end
 
     forecast_dates = sort(unique(forecast_samples.date))
-    delay_pmf = discretise(sec_result.observations.primary |> _ -> Dirac(0.0)).pmf
+    sample_ids = sort(unique(forecast_samples.sample))
 
-    # For each sample, scale primary by frac
+    # Build a date→index lookup for efficient access
+    date_idx = Dict(d => i for (i, d) in enumerate(forecast_dates))
     n_dates = length(forecast_dates)
-    mat = Matrix{Float64}(undef, n_dates, min(n_samples, length(unique(forecast_samples.sample))))
+    n_out = min(n_samples, length(sample_ids))
+    mat = Matrix{Float64}(undef, n_dates, n_out)
 
-    for (si, s) in enumerate(unique(forecast_samples.sample))
-        si > size(mat, 2) && break
+    for (si, s) in enumerate(sample_ids)
+        si > n_out && break
         s_data = filter(r -> r.sample == s, forecast_samples)
-        sort!(s_data, :date)
+        # Build primary vector in date order
+        primary_vec = zeros(Float64, n_dates)
+        for r in eachrow(s_data)
+            idx = get(date_idx, r.date, nothing)
+            !isnothing(idx) && (primary_vec[idx] = r.value)
+        end
+
         frac_i = frac_samples[mod1(si, n_samples)]
-        for (ti, d) in enumerate(forecast_dates)
-            row = findfirst(r -> r.date == d, eachrow(s_data))
-            val = isnothing(row) ? 0.0 : s_data.value[row]
-            mat[ti, si] = frac_i * val
+        scaled = frac_i .* primary_vec
+        expected = convolve(scaled, delay_pmf)
+
+        if secondary.type == :prevalence
+            expected = cumsum(expected)
+        end
+
+        for t in 1:n_dates
+            mat[t, si] = expected[t]
         end
     end
 

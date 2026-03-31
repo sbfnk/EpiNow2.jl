@@ -32,7 +32,7 @@ plot(result)
 - **Forecasting** — project Rt and infections forward
 - **Multi-region estimation** — `regional_epinow()` with Julia thread
   parallelism
-- **Validated** — numerical results match R's EpiNow2 within 2%
+- **Validated** — numerical results tested against R's EpiNow2 output
 
 ## Getting started
 

@@ -310,4 +310,143 @@ using Random
         @test result isa EpiNow2.EstimateTruncationResult
         @test result.dist isa LogNormal
     end
+
+    @testset "epinow end-to-end" begin
+        Random.seed!(42)
+
+        data = example_confirmed()
+
+        result = epinow(
+            data;
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=7),
+            inference = inference_opts(
+                samples=100, warmup=100, chains=1, progress=false
+            ),
+            verbose=false
+        )
+
+        @test result isa EpiNow2.EpinowResult
+        @test result.estimates isa EpiNow2.EstimateInfectionsResult
+        @test nrow(result.estimates.rt) > 60  # obs + forecast
+    end
+
+    @testset "accessors" begin
+        Random.seed!(42)
+
+        n_days = 30
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, n_days)
+        cases = round.(Int, 100 .* exp.(0.05 .* (1:n_days)))
+        data = DataFrame(date=collect(dates), confirm=cases)
+
+        result = estimate_infections(
+            data;
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = inference_opts(
+                samples=50, warmup=50, chains=1, progress=false
+            ),
+            verbose=false
+        )
+
+        # get_samples
+        samples = get_samples(result)
+        @test samples isa DataFrame
+        @test :date in propertynames(samples)
+        @test :variable in propertynames(samples)
+        @test :sample in propertynames(samples)
+        @test :value in propertynames(samples)
+        @test nrow(samples) > 0
+
+        # get_samples with variable filter
+        rt_samples = get_samples(result; variable=:R)
+        @test all(rt_samples.variable .== :R)
+
+        # get_predictions
+        preds = get_predictions(result)
+        @test preds isa DataFrame
+        @test :date in propertynames(preds)
+
+        # get_parameters
+        params = get_parameters(result)
+        @test params isa Dict
+        @test :R0 in keys(params)
+
+        # summary
+        s = summary(result)
+        @test s isa DataFrame
+        @test :variable in propertynames(s)
+    end
+
+    @testset "simulate_secondary" begin
+        data = example_confirmed()
+        primary = rename(data, :confirm => :primary)
+
+        result = simulate_secondary(
+            primary;
+            delays = delay_opts(LogNormal(1.5, 0.5)),
+            frac = 0.1
+        )
+
+        @test result isa DataFrame
+        @test :secondary in propertynames(result)
+        @test nrow(result) == nrow(data)
+        @test all(result.secondary .>= 0)
+    end
+
+    @testset "_R_to_r convergence guard" begin
+        gt_pmf = [0.3, 0.4, 0.2, 0.1]
+        # Normal case should converge
+        r = EpiNow2._R_to_r(1.5, gt_pmf)
+        @test isfinite(r)
+        @test r > 0
+
+        # R=1 should give r≈0
+        r1 = EpiNow2._R_to_r(1.0, gt_pmf)
+        @test abs(r1) < 0.01
+    end
+
+    @testset "error paths" begin
+        # Missing columns
+        @test_throws ArgumentError EpiNow2.EpiData(DataFrame(x=[1,2]))
+        @test_throws ArgumentError EpiNow2.SecondaryData(DataFrame(x=[1,2]))
+
+        # Invalid PMF
+        @test_throws ArgumentError NonParametricDist([0.5, 0.3])  # doesn't sum to 1
+
+        # ADVI not supported
+        @test_throws ErrorException inference_opts(sampler=:advi)  |>
+            opts -> EpiNow2._make_sampler(opts)
+    end
+
+    @testset "CrIs parameter passthrough" begin
+        Random.seed!(42)
+
+        n_days = 30
+        dates = Date(2024, 1, 1):Day(1):Date(2024, 1, n_days)
+        cases = round.(Int, 100 .* exp.(0.05 .* (1:n_days)))
+        data = DataFrame(date=collect(dates), confirm=cases)
+
+        result = estimate_infections(
+            data;
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            CrIs = [0.5, 0.9],
+            inference = inference_opts(
+                samples=50, warmup=50, chains=1, progress=false
+            ),
+            verbose=false
+        )
+
+        # Should have 50% and 90% CrIs but NOT 20%
+        @test :lower_50 in propertynames(result.rt)
+        @test :lower_90 in propertynames(result.rt)
+        @test !(:lower_20 in propertynames(result.rt))
+    end
 end

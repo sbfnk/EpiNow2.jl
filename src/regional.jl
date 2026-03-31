@@ -39,22 +39,26 @@ result.regional[:A]
 """
 function regional_epinow(
     data::DataFrame;
-    non_zero_points::Int = 2,
+    non_zero_points::Int = 7,
     verbose::Bool = false,
     kwargs...
 )
-    @assert :region in propertynames(data) "Data must have a :region column"
+    :region in propertynames(data) || throw(ArgumentError("Data must have a :region column"))
 
     regions = unique(data.region)
     n_regions = length(regions)
 
     verbose && @info "Running epinow for $n_regions regions..."
 
-    # Run in parallel using Julia threads
-    results = Dict{String, Union{EpinowResult, Exception}}()
-    timings = Dict{String, Float64}()
+    # Run in parallel using Julia threads.
+    # Collect into per-index vectors to avoid concurrent Dict writes.
+    region_results = Vector{Union{EpinowResult, Exception, Nothing}}(
+        nothing, n_regions
+    )
+    region_timings = Vector{Float64}(undef, n_regions)
 
-    Threads.@threads for region in regions
+    Threads.@threads for i in 1:n_regions
+        region = regions[i]
         region_data = filter(r -> r.region == region, data)
 
         # Check minimum non-zero data points
@@ -69,12 +73,21 @@ function regional_epinow(
                 select(region_data, Not(:region));
                 verbose=false, kwargs...
             )
-            results[region] = result
-            timings[region] = time() - t0
+            region_results[i] = result
+            region_timings[i] = time() - t0
         catch e
             @warn "Region $region failed" exception=e
-            results[region] = e
+            region_results[i] = e
         end
+    end
+
+    # Collect into Dicts (single-threaded)
+    results = Dict{String, Union{EpinowResult, Exception}}()
+    timings = Dict{String, Float64}()
+    for i in 1:n_regions
+        isnothing(region_results[i]) && continue
+        results[string(regions[i])] = region_results[i]
+        timings[string(regions[i])] = region_timings[i]
     end
 
     RegionalEpinowResult(results, timings)

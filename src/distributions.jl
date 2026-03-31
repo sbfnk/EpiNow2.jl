@@ -19,8 +19,8 @@ struct NonParametricDist
 
     function NonParametricDist(pmf::AbstractVector{<:Real})
         p = Vector{Float64}(pmf)
-        @assert sum(p) ≈ 1.0 "PMF must sum to 1"
-        @assert all(p .>= 0) "PMF values must be non-negative"
+        sum(p) ≈ 1.0 || throw(ArgumentError("PMF must sum to 1, got $(sum(p))"))
+        all(p .>= 0) || throw(ArgumentError("PMF values must be non-negative"))
         new(p)
     end
 end
@@ -41,8 +41,8 @@ UncertainDistribution(
 )
 ```
 """
-struct UncertainDistribution
-    constructor::Function
+struct UncertainDistribution{F<:Function}
+    constructor::F
     param_priors::Vector{<:Distribution}
     max::Float64
 end

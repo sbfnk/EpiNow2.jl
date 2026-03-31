@@ -76,7 +76,8 @@ function get_samples(result::EstimateInfectionsResult; variable=nothing)
     gqs = fit.generated_quantities
 
     dates = _output_dates(meta)
-    rows = []
+    rows = NamedTuple{(:date, :variable, :sample, :value),
+                      Tuple{Date, Symbol, Int, Float64}}[]
 
     for (i, gq) in enumerate(gqs)
         for (var, values) in pairs(gq)
@@ -159,8 +160,10 @@ end
 
 # ── Internal: build result from generated quantities ─────────────────────
 
-function build_result(fit::EpiNow2Fit, data::EpiData, elapsed::Float64)
-    CrIs = [0.2, 0.5, 0.9]
+function build_result(
+    fit::EpiNow2Fit, data::EpiData, elapsed::Float64;
+    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+)
     dates = _output_dates(fit.metadata)
 
     infections = _summarise_gq(fit, :infections, dates, CrIs)
@@ -266,8 +269,26 @@ function _compute_growth_rate(
 end
 
 function _samples_to_quantiles(samples::DataFrame, CrIs::Vector{Float64})
-    # TODO: implement with DataFrames groupby
-    DataFrame()
+    isempty(samples) && return DataFrame()
+    probs = Float64[]
+    for cri in CrIs
+        push!(probs, (1 - cri) / 2)
+        push!(probs, (1 + cri) / 2)
+    end
+    sort!(unique!(probs))
+
+    grouped = groupby(samples, :date)
+    rows = NamedTuple[]
+    for g in grouped
+        vals = g.value
+        row = (date = g.date[1],)
+        for p in probs
+            pct = round(Int, p * 100)
+            row = merge(row, NamedTuple{(Symbol("q$pct"),)}((quantile(vals, p),)))
+        end
+        push!(rows, row)
+    end
+    DataFrame(rows)
 end
 
 function _snapshot_summary(result, date, CrIs)

@@ -64,6 +64,7 @@ Options for time-varying reproduction number estimation.
 - `prior`: Prior on initial Rt (default: LogNormal(mean=1, sd=1))
 - `use_rt`: Whether to use Rt model vs back-calculation (default: true)
 - `rw`: Random walk period in days (0=none, 7=weekly) (default: 0)
+- `future`: How to handle Rt in forecast: `:latest` (hold constant), `:project` (extend GP) (default: `:latest`)
 - `gp_on`: Apply GP to `:Rt_minus_1` or `:R0` (default: `:Rt_minus_1`)
 - `pop`: Susceptible population for depletion adjustment (default: 0=none)
 """
@@ -71,13 +72,11 @@ Base.@kwdef struct RtOpts
     prior::Distribution = LogNormal(_moments_to_lognormal(1.0, 1.0)...)
     use_rt::Bool = true
     rw::Int = 0
-    use_breakpoints::Bool = true
     future::Symbol = :latest
     gp_on::Symbol = :Rt_minus_1
     pop::Float64 = 0.0
     pop_period::Symbol = :forecast
     pop_floor::Float64 = 1.0
-    growth_method::Symbol = :infections
 end
 
 rt_opts(; kwargs...) = RtOpts(; kwargs...)
@@ -93,7 +92,7 @@ Setting `basis_prop=0` disables the GP entirely.
 Base.@kwdef struct GPOpts
     basis_prop::Float64 = 0.2
     boundary_scale::Float64 = 1.5
-    ls::Distribution = LogNormal(_moments_to_lognormal(21.0, 7.0)...)
+    ls::Distribution = truncated(LogNormal(_moments_to_lognormal(21.0, 7.0)...); upper=60.0)
     alpha::Distribution = Normal(0.0, 0.01)
     kernel::Symbol = :matern
     matern_order::Float64 = 1.5
@@ -120,16 +119,24 @@ Base.@kwdef struct ObsOpts
     week_effect::Bool = true
     week_length::Int = 7
     scale::Union{Float64, Distribution} = 1.0
-    likelihood::Bool = true
-    return_likelihood::Bool = false
 end
 
 obs_opts(; kwargs...) = ObsOpts(; kwargs...)
 
 # ── Back-calculation ─────────────────────────────────────────────────────
 
+"""
+    BackcalcOpts(; prior, prior_window, rt_window)
+
+Back-calculation (deconvolution) options. Used when `rt_opts(use_rt=false)`.
+
+- `prior`: Prior mode — `:infections` (default, multiplicative correction),
+  `:none` (pure GP), or `:growth_rate` (random walk)
+- `prior_window`: Smoothing window for prior (default: 14)
+- `rt_window`: Smoothing window for post-hoc Rt (default: 1)
+"""
 Base.@kwdef struct BackcalcOpts
-    prior::Symbol = :reports
+    prior::Symbol = :infections
     prior_window::Int = 14
     rt_window::Int = 1
 end
@@ -139,7 +146,7 @@ backcalc_opts(; kwargs...) = BackcalcOpts(; kwargs...)
 # ── Forecasting ──────────────────────────────────────────────────────────
 
 """
-    ForecastOpts(; horizon, accumulate)
+    ForecastOpts(; horizon)
 
 Forecasting options. Construct via `forecast_opts()`.
 
@@ -147,7 +154,6 @@ Forecasting options. Construct via `forecast_opts()`.
 """
 Base.@kwdef struct ForecastOpts
     horizon::Int = 7
-    accumulate::Union{Int, Nothing} = nothing
 end
 
 forecast_opts(; kwargs...) = ForecastOpts(; kwargs...)
@@ -166,8 +172,8 @@ Base.@kwdef struct InferenceOpts
     warmup::Int = 250
     chains::Int = 4
     seed::Union{Int, Nothing} = nothing
-    target_acceptance::Float64 = 0.8
-    max_treedepth::Int = 10
+    target_acceptance::Float64 = 0.9
+    max_treedepth::Int = 12
     progress::Bool = true
 end
 
@@ -175,11 +181,44 @@ inference_opts(; kwargs...) = InferenceOpts(; kwargs...)
 
 # ── Secondary model ──────────────────────────────────────────────────────
 
+"""
+    SecondaryOpts(; type)
+
+Secondary observation model options. Use `secondary_opts(:incidence)` or
+`secondary_opts(:prevalence)` for presets, or configure flags directly.
+
+- `cumulative`: carry forward secondary observations
+- `historic`: include convolved history
+- `primary_hist_additive`: add (true) or subtract (false) history
+- `current`: include current primary
+- `primary_current_additive`: add (true) or subtract (false) current
+"""
 Base.@kwdef struct SecondaryOpts
     type::Symbol = :incidence
+    cumulative::Bool = false
+    historic::Bool = true
+    primary_hist_additive::Bool = true
+    current::Bool = false
+    primary_current_additive::Bool = false
 end
 
-secondary_opts(; kwargs...) = SecondaryOpts(; kwargs...)
+function secondary_opts(type::Symbol=:incidence; kwargs...)
+    if type == :incidence
+        SecondaryOpts(;
+            type=:incidence, cumulative=false, historic=true,
+            primary_hist_additive=true, current=false,
+            primary_current_additive=false, kwargs...
+        )
+    elseif type == :prevalence
+        SecondaryOpts(;
+            type=:prevalence, cumulative=true, historic=true,
+            primary_hist_additive=false, current=true,
+            primary_current_additive=true, kwargs...
+        )
+    else
+        SecondaryOpts(; type, kwargs...)
+    end
+end
 
 # ── Show methods ─────────────────────────────────────────────────────────
 

@@ -46,7 +46,7 @@ function estimate_truncation(
     CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
     verbose::Bool = true
 )
-    @assert length(data) >= 2 "Need at least 2 snapshots"
+    length(data) >= 2 || throw(ArgumentError("Need at least 2 snapshots"))
 
     sorted_snaps = [sort(df, :date) for df in data]
     epi_datas = [EpiData(df) for df in sorted_snaps]

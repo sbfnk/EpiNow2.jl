@@ -22,10 +22,11 @@ struct EpiData
     date::Vector{Date}
     confirm::Vector{Int}
     accumulate::Vector{Bool}
+    breakpoints::Vector{Int}
 
     function EpiData(df::DataFrame)
-        @assert :date in propertynames(df) "Data must have a :date column"
-        @assert :confirm in propertynames(df) "Data must have a :confirm column"
+        :date in propertynames(df) || throw(ArgumentError("Data must have a :date column"))
+        :confirm in propertynames(df) || throw(ArgumentError("Data must have a :confirm column"))
 
         sorted = sort(df, :date)
         dates = Date.(sorted.date)
@@ -45,7 +46,13 @@ struct EpiData
             fill(false, length(dates))
         end
 
-        new(dates, confirm, accumulate)
+        breakpoints = if :breakpoints in propertynames(sorted)
+            Int.(sorted.breakpoints)
+        else
+            fill(0, length(dates))
+        end
+
+        new(dates, confirm, accumulate, breakpoints)
     end
 end
 
@@ -67,9 +74,9 @@ struct SecondaryData
     secondary::Vector{Int}
 
     function SecondaryData(df::DataFrame)
-        @assert :date in propertynames(df) "Must have :date column"
-        @assert :primary in propertynames(df) "Must have :primary column"
-        @assert :secondary in propertynames(df) "Must have :secondary column"
+        :date in propertynames(df) || throw(ArgumentError("Must have :date column"))
+        :primary in propertynames(df) || throw(ArgumentError("Must have :primary column"))
+        :secondary in propertynames(df) || throw(ArgumentError("Must have :secondary column"))
 
         sorted = sort(df, :date)
         new(Date.(sorted.date), Int.(sorted.primary), Int.(sorted.secondary))
@@ -101,6 +108,38 @@ function example_confirmed()
     end
     cases = [max(1, round(Int, x)) for x in infections]
     DataFrame(date=collect(dates), confirm=cases)
+end
+
+# ── Example delay distributions (matching R's example_* functions) ───
+
+"""
+    example_generation_time()
+
+Example generation time distribution for COVID-19 (Ganyani et al. 2020).
+Mean 3.6 days, SD 3.1 days, as a LogNormal.
+"""
+function example_generation_time()
+    LogNormal(_moments_to_lognormal(3.6, 3.1)...)
+end
+
+"""
+    example_incubation_period()
+
+Example incubation period for COVID-19 (Lauer et al. 2020).
+Mean 5.2 days, SD 2.8 days, as a LogNormal.
+"""
+function example_incubation_period()
+    LogNormal(_moments_to_lognormal(5.2, 2.8)...)
+end
+
+"""
+    example_reporting_delay()
+
+Example reporting delay (onset to report) for COVID-19.
+Mean 2.0 days, SD 1.0 day, as a LogNormal.
+"""
+function example_reporting_delay()
+    LogNormal(_moments_to_lognormal(2.0, 1.0)...)
 end
 
 # ── Helpers ──────────────────────────────────────────────────────────────
