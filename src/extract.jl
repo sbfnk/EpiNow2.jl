@@ -347,7 +347,11 @@ function get_imputed_reports(
             μ = max(Float64(reports[t]), 1e-6)
             if has_phi
                 φ = 1.0 / Float64(phi_samples[i])^2
-                mat[t, i] = Float64(rand(NegativeBinomial2(μ, φ)))
+                # Safe NegBin sampling: fall back to Poisson for extreme φ,
+                # and clamp μ to avoid overflow in integer conversion
+                μ_safe = min(μ, 1e15)
+                mat[t, i] = φ > 1e-4 ? Float64(rand(NegativeBinomial2(μ_safe, φ))) :
+                                        Float64(rand(Poisson(μ_safe)))
             else
                 mat[t, i] = Float64(rand(Poisson(μ)))
             end

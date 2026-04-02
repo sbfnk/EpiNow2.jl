@@ -10,13 +10,35 @@ Run Bayesian inference on the assembled Turing model.
 """
 function run_inference(model, metadata, opts::InferenceOpts)
     chain = _sample(model, opts)
-
-    # Extract generated quantities (infections, R, reports) from the
-    # return values of the @model function.
-    # Flatten to a Vector for consistent handling (multi-chain returns matrix).
-    gq_vec = vec(Turing.returned(model, chain))
-
+    gq_vec = _extract_generated_quantities(model, chain)
     EpiNow2Fit(chain, gq_vec, metadata)
+end
+
+"""
+Extract generated quantities by replaying the model for each posterior draw.
+Uses DynamicPPL's low-level API to condition the model on chain values,
+avoiding the re-initialisation that can fail with domain-constrained parameters.
+"""
+function _extract_generated_quantities(model, chain)
+    n_samples = size(chain, 1)
+    n_chains = size(chain, 3)
+    param_names = names(chain, :parameters)
+
+    gqs = Vector{Any}(undef, n_samples * n_chains)
+    idx = 1
+    for c in 1:n_chains
+        for s in 1:n_samples
+            # Build conditioning pairs from this posterior draw
+            pairs = [
+                Turing.DynamicPPL.VarName{Symbol(name)}() => chain[s, name, c]
+                for name in param_names
+            ]
+            conditioned = Turing.DynamicPPL.condition(model, pairs...)
+            gqs[idx] = conditioned()
+            idx += 1
+        end
+    end
+    gqs
 end
 
 function _sample(model, opts::InferenceOpts)
@@ -27,12 +49,14 @@ function _sample(model, opts::InferenceOpts)
         Turing.sample(
             rng, model, sampler, MCMCThreads(),
             opts.samples, opts.chains;
-            discard_initial=0, progress=opts.progress
+            discard_initial=0, progress=opts.progress,
+            check_model=false
         )
     else
         Turing.sample(
             rng, model, sampler, opts.samples;
-            discard_initial=0, progress=opts.progress
+            discard_initial=0, progress=opts.progress,
+            check_model=false
         )
     end
 end
