@@ -302,7 +302,7 @@ using Random
         result = estimate_truncation(
             snapshots;
             inference = inference_opts(
-                samples=100, warmup=100, chains=1, seed=42, progress=false
+                samples=100, warmup=100, chains=1, seed=123, progress=false
             ),
             verbose=false
         )
