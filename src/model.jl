@@ -703,10 +703,11 @@ end
     sdlog_prior::Distribution
 )
     trunc_meanlog ~ meanlog_prior
-    trunc_sdlog ~ sdlog_prior
+    # Sample on log scale so sdlog is always positive
+    log_trunc_sdlog ~ Normal(log(mean(sdlog_prior)), std(sdlog_prior) / mean(sdlog_prior))
+    trunc_sdlog = exp(log_trunc_sdlog)
 
-    # Guard sdlog: leapfrog integrator can step to negative values
-    d = Distributions.LogNormal(trunc_meanlog, max(1e-6, trunc_sdlog))
+    d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
     cd = CensoredDistributions.double_interval_censored(d; interval=1, upper=max_trunc + 1)
     trunc_pmf = [exp(logpdf(cd, k)) for k in 0:max_trunc]
     trunc_pmf = trunc_pmf ./ sum(trunc_pmf)
