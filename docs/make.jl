@@ -16,7 +16,7 @@ makedocs(;
         "Multiple data streams" => "secondary.md",
         "API Reference" => "api.md",
     ],
-    warnonly=true
+    warnonly=[:missing_docs, :cross_references]
 )
 
 deploydocs(;

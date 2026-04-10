@@ -7,6 +7,7 @@ numbers and performing short-term forecasts using EpiNow2.jl.
 
 ```@example workflow
 using EpiNow2
+using CairoMakie
 using CSV, DataFrames, Dates, Distributions, Statistics
 nothing # hide
 ```
@@ -113,7 +114,7 @@ result = estimate_infections(
     generation_time = gt_opts(generation_time),
     delays = delay_opts(discretise(delay)),
     forecast = forecast_opts(horizon=7),
-    inference = inference_opts(samples=1000, warmup=250, chains=2),
+    inference = inference_opts(samples=500, warmup=250, chains=1),
     verbose=false
 )
 result

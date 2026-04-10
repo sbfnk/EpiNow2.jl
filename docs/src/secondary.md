@@ -86,7 +86,7 @@ est = estimate_infections(
     generation_time = gt_opts(generation_time),
     delays = delay_opts(discretise(delay)),
     forecast = forecast_opts(horizon=14),
-    inference = inference_opts(samples=1000, warmup=250, chains=2),
+    inference = inference_opts(samples=500, warmup=250, chains=1),
     verbose=false
 )
 est
@@ -108,7 +108,7 @@ sec = estimate_secondary(
     sec_data;
     delays = delay_opts(LogNormal(1.6, 0.5)),
     obs = obs_opts(week_effect=false),
-    inference = inference_opts(samples=1000, warmup=250, chains=2),
+    inference = inference_opts(samples=500, warmup=250, chains=1),
     burn_in=14,
     verbose=false
 )
