@@ -66,7 +66,7 @@ generation time, incubation period, and reporting delay.
 
 ```@example secondary
 generation_time = UncertainDistribution(
-    (shape, rate) -> Gamma(shape, 1 / rate),
+    (shape, rate) -> Gamma(max(1e-6, shape), max(1e-6, 1 / rate)),
     [truncated(Normal(1.4, 0.48); lower=0.01),
      truncated(Normal(0.38, 0.25); lower=0.01)],
     14.0

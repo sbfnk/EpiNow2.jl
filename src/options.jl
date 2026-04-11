@@ -196,11 +196,13 @@ inference_opts(; kwargs...) = InferenceOpts(; kwargs...)
 
 # ── Secondary model ──────────────────────────────────────────────────────
 
+@enum SecondaryType incidence prevalence
+
 """
     SecondaryOpts(; type)
 
-Secondary observation model options. Use `secondary_opts(:incidence)` or
-`secondary_opts(:prevalence)` for presets, or configure flags directly.
+Secondary observation model options. Use `secondary_opts(incidence)` or
+`secondary_opts(prevalence)` for presets, or configure flags directly.
 
 - `cumulative`: carry forward secondary observations
 - `historic`: include convolved history
@@ -208,8 +210,6 @@ Secondary observation model options. Use `secondary_opts(:incidence)` or
 - `current`: include current primary
 - `primary_current_additive`: add (true) or subtract (false) current
 """
-@enum SecondaryType incidence prevalence
-
 Base.@kwdef struct SecondaryOpts
     type::SecondaryType = incidence
     cumulative::Bool = false

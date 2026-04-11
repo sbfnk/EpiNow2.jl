@@ -45,7 +45,7 @@ An uncertain Gamma (priors on shape and rate):
 
 ```@example workflow
 uncertain_gamma = UncertainDistribution(
-    (shape, rate) -> Gamma(shape, 1 / rate),
+    (shape, rate) -> Gamma(max(1e-6, shape), max(1e-6, 1 / rate)),
     [Normal(3.0, 2.0), truncated(Normal(1.0, 0.1); lower=0.01)],
     10.0
 )
@@ -56,7 +56,7 @@ plot(uncertain_gamma)
 
 ```@example workflow
 generation_time = UncertainDistribution(
-    (shape, rate) -> Gamma(shape, 1 / rate),
+    (shape, rate) -> Gamma(max(1e-6, shape), max(1e-6, 1 / rate)),
     [truncated(Normal(1.4, 0.48); lower=0.01),
      truncated(Normal(0.38, 0.25); lower=0.01)],
     14.0
