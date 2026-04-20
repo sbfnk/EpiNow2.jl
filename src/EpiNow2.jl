@@ -29,6 +29,7 @@ using DataFrames
 using Distributions
 using LinearAlgebra
 using MCMCChains
+using Mooncake
 using PrecompileTools
 using Random
 using ReverseDiff
@@ -37,7 +38,7 @@ using Statistics
 using Turing
 
 # ── AD backends (re-exported from ADTypes for convenience in inference_opts) ─
-export AutoForwardDiff, AutoReverseDiff
+export AutoForwardDiff, AutoReverseDiff, AutoMooncake
 
 # ── Distribution system ────────────────────────────────────────────────
 export NonParametricDist, UncertainDistribution, DelayDistribution,
