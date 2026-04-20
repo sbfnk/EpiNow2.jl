@@ -176,10 +176,23 @@ forecast_opts(; kwargs...) = ForecastOpts(; kwargs...)
 # ── Inference (replaces stan_opts) ───────────────────────────────────────
 
 """
-    InferenceOpts(; sampler, samples, warmup, chains, seed, ...)
+    InferenceOpts(; sampler, samples, warmup, chains, seed, adtype, ...)
 
 Options controlling the Turing.jl inference backend.
 Replaces EpiNow2's `stan_opts()`.
+
+`adtype` selects the automatic-differentiation backend used by NUTS.
+The default is `AutoReverseDiff(compile=true)` which is typically
+5-10× faster than Turing's library default (`AutoForwardDiff`) for
+EpiNow2-shaped models, where parameter count grows with the number of
+random-walk / GP basis terms. ForwardDiff cost scales linearly in the
+parameter count; reverse-mode does not.
+
+Pass any other `ADTypes.AbstractADType`, e.g. `AutoForwardDiff()`,
+`AutoMooncake()`, or `AutoReverseDiff(compile=false)` if `compile=true`
+hits a tape mismatch (which can happen with model branches that depend
+on parameter values — EpiNow2 does not currently have any such
+branches, but extensions might).
 """
 Base.@kwdef struct InferenceOpts
     sampler::InferenceSampler = nuts
@@ -190,6 +203,7 @@ Base.@kwdef struct InferenceOpts
     target_acceptance::Float64 = 0.9
     max_treedepth::Int = 12
     progress::Bool = true
+    adtype::ADTypes.AbstractADType = ADTypes.AutoReverseDiff(compile=true)
 end
 
 inference_opts(; kwargs...) = InferenceOpts(; kwargs...)
@@ -279,4 +293,5 @@ function Base.show(io::IO, ::MIME"text/plain", o::InferenceOpts)
     println(io, "Inference options:")
     println(io, "  sampler: $(o.sampler)")
     println(io, "  samples: $(o.samples), warmup: $(o.warmup), chains: $(o.chains)")
+    println(io, "  adtype: $(o.adtype)")
 end

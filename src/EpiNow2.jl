@@ -21,6 +21,7 @@ plot(result)
 """
 module EpiNow2
 
+using ADTypes
 using CSV
 using CensoredDistributions
 using Dates
@@ -28,10 +29,15 @@ using DataFrames
 using Distributions
 using LinearAlgebra
 using MCMCChains
+using PrecompileTools
 using Random
+using ReverseDiff
 using SpecialFunctions: loggamma, besseli
 using Statistics
 using Turing
+
+# ── AD backends (re-exported from ADTypes for convenience in inference_opts) ─
+export AutoForwardDiff, AutoReverseDiff
 
 # ── Distribution system ────────────────────────────────────────────────
 export NonParametricDist, UncertainDistribution, DelayDistribution,
@@ -79,10 +85,35 @@ include("secondary.jl")
 include("truncation.jl")
 include("regional.jl")
 include("utilities.jl")
+include("r_bridge.jl")
 
 # Stubs for plotting functions (implemented by CairoMakie extension)
 function report_plots end
 function plot_summary end
 export report_plots, plot_summary
+
+# ── Precompile workload ───────────────────────────────────────────────────
+# Run a tiny end-to-end fit at package precompile time so the model-specific
+# JIT (Turing @model expansion, ReverseDiff tape, NUTS adaptation kernels)
+# is baked into the precompile cache. Without this, the first user-facing
+# `epinow()` / `estimate_infections()` call in a fresh session pays ~30-60 s
+# of JIT before any sampling starts.
+@setup_workload begin
+    workload_data = example_confirmed()[1:30, :]
+    workload_gt = gt_opts(example_generation_time())
+    workload_delays = delay_opts(example_reporting_delay())
+    @compile_workload begin
+        estimate_infections(
+            workload_data;
+            generation_time = workload_gt,
+            delays = workload_delays,
+            rt = rt_opts(rw = 7),
+            inference = inference_opts(
+                samples = 5, warmup = 5, chains = 1, progress = false
+            ),
+            verbose = false,
+        )
+    end
+end
 
 end # module

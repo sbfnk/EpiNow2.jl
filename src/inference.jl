@@ -80,7 +80,8 @@ function _make_sampler(opts::InferenceOpts)
     Turing.NUTS(
         opts.warmup,
         opts.target_acceptance;
-        max_depth=opts.max_treedepth
+        max_depth=opts.max_treedepth,
+        adtype=opts.adtype
     )
 end
 
