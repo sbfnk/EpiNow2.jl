@@ -289,13 +289,16 @@ Generative process:
     if !isempty(gt_uncertain)
         gt_pmfs = Vector{Any}(undef, length(gt_uncertain))
         for (ci, ud) in enumerate(gt_uncertain)
-            ud_params = Vector{Real}(undef, length(ud.param_priors))
-            for (i, prior) in enumerate(ud.param_priors)
-                ud_params[i] ~ prior
-                if !(delay_prior_weight ≈ 1.0)
-                    # Scale prior contribution: add (weight-1)*logpdf to get weight*logpdf total
-                    Turing.@addlogprob! (delay_prior_weight - 1.0) * logpdf(prior, ud_params[i])
-                end
+            # Sample all params as one tracked vector via arraydist; this
+            # gives ReverseDiff a typed storage to write gradients into.
+            # (`Vector{Real}(undef, ...)` was abstract-eltype and broke
+            # ReverseDiff's increment_deriv! propagation.)
+            ud_params ~ arraydist(ud.param_priors)
+            if !(delay_prior_weight ≈ 1.0)
+                # Scale prior contribution: add (weight-1)*logpdf to get weight*logpdf total
+                Turing.@addlogprob! (delay_prior_weight - 1.0) *
+                    sum(logpdf(p, ud_params[i])
+                        for (i, p) in enumerate(ud.param_priors))
             end
             gt_pmfs[ci] = discretise_ad(
                 ud.constructor(ud_params...), Int(ud.max)
@@ -308,12 +311,11 @@ Generative process:
     if !isempty(delay_uncertain)
         delay_pmfs = Vector{Any}(undef, length(delay_uncertain))
         for (ci, ud) in enumerate(delay_uncertain)
-            ud_params = Vector{Real}(undef, length(ud.param_priors))
-            for (i, prior) in enumerate(ud.param_priors)
-                ud_params[i] ~ prior
-                if !(delay_prior_weight ≈ 1.0)
-                    Turing.@addlogprob! (delay_prior_weight - 1.0) * logpdf(prior, ud_params[i])
-                end
+            ud_params ~ arraydist(ud.param_priors)
+            if !(delay_prior_weight ≈ 1.0)
+                Turing.@addlogprob! (delay_prior_weight - 1.0) *
+                    sum(logpdf(p, ud_params[i])
+                        for (i, p) in enumerate(ud.param_priors))
             end
             delay_pmfs[ci] = discretise_ad(
                 ud.constructor(ud_params...), Int(ud.max)
@@ -525,10 +527,7 @@ Generative process:
 
     # ── Truncation adjustment ─────────────────────────────────────
     if !isnothing(trunc_uncertain)
-        trunc_params = Vector{Real}(undef, length(trunc_uncertain.param_priors))
-        for (i, prior) in enumerate(trunc_uncertain.param_priors)
-            trunc_params[i] ~ prior
-        end
+        trunc_params ~ arraydist(trunc_uncertain.param_priors)
         trunc_dist = trunc_uncertain.constructor(trunc_params...)
         trunc_pmf = discretise_ad(trunc_dist, Int(trunc_uncertain.max))
         trunc_rev_cmf = reverse(cumsum(trunc_pmf))
