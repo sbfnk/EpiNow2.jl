@@ -182,17 +182,20 @@ Options controlling the Turing.jl inference backend.
 Replaces EpiNow2's `stan_opts()`.
 
 `adtype` selects the automatic-differentiation backend used by NUTS.
-The default is `AutoReverseDiff(compile=true)` which is typically
-5-10× faster than Turing's library default (`AutoForwardDiff`) for
-EpiNow2-shaped models, where parameter count grows with the number of
-random-walk / GP basis terms. ForwardDiff cost scales linearly in the
-parameter count; reverse-mode does not.
+The default is `AutoReverseDiff(compile=false)`, which scales better
+than Turing's library default (`AutoForwardDiff`) on EpiNow2-shaped
+models where parameter count grows with the number of random-walk /
+GP basis terms.
 
-Pass any other `ADTypes.AbstractADType`, e.g. `AutoForwardDiff()`,
-`AutoMooncake()`, or `AutoReverseDiff(compile=false)` if `compile=true`
-hits a tape mismatch (which can happen with model branches that depend
-on parameter values — EpiNow2 does not currently have any such
-branches, but extensions might).
+`AutoReverseDiff(compile=true)` is opt-in: it bakes the AD tape at
+compile time for a further ~1.5× speedup, but the frozen tape can hit
+`DomainError` on `log`/`sqrt`/etc. when sampling visits parameter
+values whose intermediate computations drift just below the recorded
+domain (a known ReverseDiff gotcha for non-trivial models). Use it
+when you have measured the win on your specific scenario.
+
+Other supported AD backends: `AutoForwardDiff()`, `AutoMooncake()`,
+or any `ADTypes.AbstractADType`.
 """
 Base.@kwdef struct InferenceOpts
     sampler::InferenceSampler = nuts
@@ -203,7 +206,7 @@ Base.@kwdef struct InferenceOpts
     target_acceptance::Float64 = 0.8
     max_treedepth::Int = 10
     progress::Bool = true
-    adtype::ADTypes.AbstractADType = ADTypes.AutoReverseDiff(compile=true)
+    adtype::ADTypes.AbstractADType = ADTypes.AutoReverseDiff(compile=false)
 end
 
 inference_opts(; kwargs...) = InferenceOpts(; kwargs...)
