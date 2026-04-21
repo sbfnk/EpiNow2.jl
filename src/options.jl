@@ -200,8 +200,8 @@ Base.@kwdef struct InferenceOpts
     warmup::Int = 250
     chains::Int = 4
     seed::Union{Int, Nothing} = nothing
-    target_acceptance::Float64 = 0.9
-    max_treedepth::Int = 12
+    target_acceptance::Float64 = 0.8
+    max_treedepth::Int = 10
     progress::Bool = true
     adtype::ADTypes.AbstractADType = ADTypes.AutoReverseDiff(compile=true)
 end
