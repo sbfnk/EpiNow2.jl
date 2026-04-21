@@ -182,20 +182,25 @@ Options controlling the Turing.jl inference backend.
 Replaces EpiNow2's `stan_opts()`.
 
 `adtype` selects the automatic-differentiation backend used by NUTS.
-The default is `AutoReverseDiff(compile=false)`, which scales better
-than Turing's library default (`AutoForwardDiff`) on EpiNow2-shaped
-models where parameter count grows with the number of random-walk /
-GP basis terms.
+The default is `AutoForwardDiff()`, which works on every model code
+path including uncertain delays and truncation.
 
-`AutoReverseDiff(compile=true)` is opt-in: it bakes the AD tape at
-compile time for a further ~1.5× speedup, but the frozen tape can hit
-`DomainError` on `log`/`sqrt`/etc. when sampling visits parameter
-values whose intermediate computations drift just below the recorded
-domain (a known ReverseDiff gotcha for non-trivial models). Use it
-when you have measured the win on your specific scenario.
+`AutoReverseDiff(compile=false)` is typically ~1.5× faster on
+EpiNow2-shaped models (where parameter count grows with the number
+of random-walk / GP basis terms) but currently fails on the
+uncertain-delays and uncertain-truncation paths: the model uses
+`Vector{Real}` to collect prior samples, and ReverseDiff's gradient
+propagator hits `MethodError` on the abstract eltype. Fixing this
+needs a refactor to typed storage; until then ReverseDiff is opt-in
+for fixed-delay models.
 
-Other supported AD backends: `AutoForwardDiff()`, `AutoMooncake()`,
-or any `ADTypes.AbstractADType`.
+`AutoReverseDiff(compile=true)` is a further ~1.5× faster again but
+its frozen tape can hit `DomainError` on `log`/`sqrt`/etc. when
+sampling visits parameter values whose intermediates drift just
+below the recorded domain.
+
+Other supported AD backends: `AutoMooncake()` or any
+`ADTypes.AbstractADType`.
 """
 Base.@kwdef struct InferenceOpts
     sampler::InferenceSampler = nuts
@@ -206,7 +211,7 @@ Base.@kwdef struct InferenceOpts
     target_acceptance::Float64 = 0.8
     max_treedepth::Int = 10
     progress::Bool = true
-    adtype::ADTypes.AbstractADType = ADTypes.AutoReverseDiff(compile=false)
+    adtype::ADTypes.AbstractADType = ADTypes.AutoForwardDiff()
 end
 
 inference_opts(; kwargs...) = InferenceOpts(; kwargs...)
