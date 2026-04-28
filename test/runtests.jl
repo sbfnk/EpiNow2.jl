@@ -277,6 +277,10 @@ using Random
 
         @test result isa EpiNow2.EstimateSecondaryResult
         @test nrow(result.predictions) > 0
+        # v1.8 epinowfit parity: args round-trip
+        @test result.args isa EpiNow2.EstimateSecondaryArgs
+        @test result.args.burn_in == 10
+        @test result.args.obs.week_effect == false
     end
 
     @testset "estimate_truncation" begin
@@ -309,6 +313,9 @@ using Random
 
         @test result isa EpiNow2.EstimateTruncationResult
         @test result.dist isa LogNormal
+        # v1.8 epinowfit parity: args round-trip
+        @test result.args isa EpiNow2.EstimateTruncationArgs
+        @test result.args.inference.samples == 100
     end
 
     @testset "epinow end-to-end" begin

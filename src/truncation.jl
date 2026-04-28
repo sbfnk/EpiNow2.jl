@@ -6,12 +6,25 @@ struct TruncationMetadata
 end
 
 """
+    EstimateTruncationArgs
+
+Captures the configuration arguments passed to `estimate_truncation()`.
+Mirrors the `args` field of EpiNow2 R's v1.8 `epinowfit` S3 class.
+"""
+struct EstimateTruncationArgs
+    truncation::TruncOpts
+    inference::InferenceOpts
+    CrIs::Vector{Float64}
+end
+
+"""
     EstimateTruncationResult
 
 Result of `estimate_truncation()`.
 """
 struct EstimateTruncationResult
     fit::EpiNow2Fit
+    args::EstimateTruncationArgs
     dist::DelayDistribution
     observations::Vector{EpiData}
     timing::Float64
@@ -83,7 +96,8 @@ function estimate_truncation(
 
     fitted_dist = _extract_truncation_dist(fit)
 
-    EstimateTruncationResult(fit, fitted_dist, epi_datas, elapsed)
+    args = EstimateTruncationArgs(truncation, inference, CrIs)
+    EstimateTruncationResult(fit, args, fitted_dist, epi_datas, elapsed)
 end
 
 function _extract_truncation_dist(fit::EpiNow2Fit)
