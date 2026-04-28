@@ -657,6 +657,32 @@ using Random
         @test !(:lower_20 in propertynames(result.rt))
     end
 
+    @testset "result has args field (v1.8 epinowfit parity)" begin
+        Random.seed!(42)
+        n_days = 30
+        dates = collect(Date(2024,1,1):Day(1):Date(2024,1,n_days))
+        cases = round.(Int, 100 .* exp.(0.05 .* (1:n_days)))
+        df = DataFrame(date=dates, confirm=cases)
+
+        result = estimate_infections(
+            df;
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = inference_opts(
+                samples=20, warmup=20, chains=1, progress=false
+            ),
+            verbose = false,
+        )
+        @test hasproperty(result, :args)
+        @test result.args isa EpiNow2.EstimateInfectionsArgs
+        # Round-trip a few key configuration choices
+        @test result.args.forecast.horizon == 0
+        @test result.args.obs.week_effect == false
+        @test result.args.inference.samples == 20
+    end
+
     @testset "convert_to_logmean / convert_to_logsd" begin
         # Round-trip a known LogNormal(meanlog=1.0, sdlog=0.5)
         d = LogNormal(1.0, 0.5)

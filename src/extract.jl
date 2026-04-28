@@ -4,12 +4,40 @@
 # back to dated DataFrames with credible intervals.
 
 """
+    EstimateInfectionsArgs
+
+Captures the configuration arguments passed to `estimate_infections()`.
+Mirrors the `args` field of EpiNow2 R's v1.8 `epinowfit` S3 class so
+that a fitted result can be inspected (and in principle replayed)
+without referring back to the original call.
+"""
+struct EstimateInfectionsArgs
+    generation_time::GTOpts
+    delays::DelayOpts
+    truncation::TruncOpts
+    rt::RtOpts
+    backcalc::BackcalcOpts
+    gp::GPOpts
+    obs::ObsOpts
+    forecast::ForecastOpts
+    inference::InferenceOpts
+    CrIs::Vector{Float64}
+end
+
+"""
     EstimateInfectionsResult
 
-Result of `estimate_infections()`.
+Result of `estimate_infections()`. Fields:
+
+- `fit`: the underlying `EpiNow2Fit` (chain + generated quantities + metadata)
+- `args`: the `EstimateInfectionsArgs` capturing the call configuration
+- `observations`: the input data as an `EpiData`
+- `infections`, `reports`, `rt`, `growth_rate`: pre-computed posterior summaries
+- `timing`: elapsed inference seconds
 """
 struct EstimateInfectionsResult
     fit::EpiNow2Fit
+    args::EstimateInfectionsArgs
     observations::EpiData
     infections::DataFrame     # by date of infection
     reports::DataFrame        # by date of report
@@ -163,7 +191,8 @@ end
 # ── Internal: build result from generated quantities ─────────────────────
 
 function build_result(
-    fit::EpiNow2Fit, data::EpiData, elapsed::Float64;
+    fit::EpiNow2Fit, data::EpiData, args::EstimateInfectionsArgs,
+    elapsed::Float64;
     CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
 )
     dates = _output_dates(fit.metadata)
@@ -176,7 +205,7 @@ function build_result(
     growth = _compute_growth_rate(fit, dates, CrIs)
 
     EstimateInfectionsResult(
-        fit, data, infections, reports, rt_df, growth, elapsed
+        fit, args, data, infections, reports, rt_df, growth, elapsed
     )
 end
 

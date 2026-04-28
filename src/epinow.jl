@@ -64,7 +64,11 @@ function estimate_infections(
 
     verbose && @info "Inference complete" seconds=round(elapsed, digits=1)
 
-    build_result(fit, epi_data, elapsed; CrIs)
+    args = EstimateInfectionsArgs(
+        generation_time, delays, truncation, rt, backcalc, gp, obs,
+        forecast, inference, CrIs,
+    )
+    build_result(fit, epi_data, args, elapsed; CrIs)
 end
 
 """
