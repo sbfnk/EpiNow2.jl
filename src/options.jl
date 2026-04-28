@@ -182,21 +182,15 @@ Options controlling the Turing.jl inference backend.
 Replaces EpiNow2's `stan_opts()`.
 
 `adtype` selects the automatic-differentiation backend used by NUTS.
-The default is `AutoForwardDiff()`, which works on every model code
-path including uncertain delays and truncation.
+The default is `AutoForwardDiff()`. On the bench scenario (60 days,
+1 chain, 250+250 iters, RW Rt + week effect + NegBin) ForwardDiff is
+roughly 20× faster than `AutoReverseDiff(compile=false)`. The crossover
+where reverse-mode would win lies far above the parameter dimensions
+typical EpiNow2 models reach, so ForwardDiff is the right default.
 
-`AutoReverseDiff(compile=false)` is typically ~1.5× faster on
-EpiNow2-shaped models (where parameter count grows with the number
-of random-walk / GP basis terms) but currently fails on the
-uncertain-delays and uncertain-truncation paths: the model uses
-`Vector{Real}` to collect prior samples, and ReverseDiff's gradient
-propagator hits `MethodError` on the abstract eltype. Fixing this
-needs a refactor to typed storage; until then ReverseDiff is opt-in
-for fixed-delay models.
-
-`AutoReverseDiff(compile=true)` is a further ~1.5× faster again but
-its frozen tape can hit `DomainError` on `log`/`sqrt`/etc. when
-sampling visits parameter values whose intermediates drift just
+`AutoReverseDiff(compile=true)` adds tape compilation for additional
+speed but its frozen tape can hit `DomainError` on `log`/`sqrt`/etc.
+when sampling visits parameter values whose intermediates drift just
 below the recorded domain.
 
 Other supported AD backends: `AutoMooncake()` or any
