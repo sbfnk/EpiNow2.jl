@@ -421,6 +421,11 @@ Generative process:
             all_infections = Vector{T}(undef, seeding_time + total_times)
             all_infections[1:seeding_time] .= initial_infections
             cum_inf = sum(initial_infections)
+            # Track depletion-adjusted Rt = R * (S / pop) for time steps
+            # where the depletion model is active. R itself is the
+            # transmission Rt assuming a fully susceptible population
+            # (mirrors EpiNow2 R v1.8 R / R_unadjusted split).
+            R_adjusted = Vector{T}(undef, total_times)
 
             for s in 1:total_times
                 t = seeding_time + s
@@ -434,8 +439,10 @@ Generative process:
                     susceptible = max(pop_floor, pop - cum_inf)
                     exp_adj = exp(-R[s] * infectiousness / susceptible)
                     all_infections[t] = susceptible * max(0.0, 1.0 - exp_adj)
+                    R_adjusted[s] = R[s] * (susceptible / pop)
                 else
                     all_infections[t] = R[s] * infectiousness
+                    R_adjusted[s] = R[s]
                 end
                 cum_inf += all_infections[t]
             end
@@ -443,6 +450,7 @@ Generative process:
             all_infections = renewal_infections(
                 R, initial_infections, gt_pmf, total_times
             )
+            R_adjusted = R
         end
 
         # Extract post-seeding infections
@@ -497,6 +505,8 @@ Generative process:
             for t in 1:total_times
         ]
         log_R = log.(R)
+        # No depletion adjustment in the back-calculation branch.
+        R_adjusted = R
     end
 
     # ── Map to expected reports ──────────────────────────────────────
@@ -578,11 +588,16 @@ Generative process:
     end
 
     # ── Return generated quantities ──────────────────────────────────
+    # `R` is the depletion-adjusted (effective) reproduction number when
+    # `pop > 0`; `R_unadjusted` is the transmission Rt assuming a fully
+    # susceptible population (mirrors EpiNow2 R v1.8 split). When pop is
+    # off, both are identical.
     return (
         infections = infections,
         reports = expected_reports,
-        R = R,
-        log_R = log_R
+        R = R_adjusted,
+        R_unadjusted = R,
+        log_R = log_R,
     )
 end
 

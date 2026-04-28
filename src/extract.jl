@@ -39,11 +39,12 @@ struct EstimateInfectionsResult
     fit::EpiNow2Fit
     args::EstimateInfectionsArgs
     observations::EpiData
-    infections::DataFrame     # by date of infection
-    reports::DataFrame        # by date of report
-    rt::DataFrame             # reproduction number by date
-    growth_rate::DataFrame    # growth rate by date
-    timing::Float64           # seconds
+    infections::DataFrame        # by date of infection
+    reports::DataFrame           # by date of report
+    rt::DataFrame                # depletion-adjusted reproduction number
+    rt_unadjusted::DataFrame     # transmission Rt (= rt when pop=0)
+    growth_rate::DataFrame       # growth rate by date
+    timing::Float64              # seconds
 end
 
 """
@@ -200,12 +201,14 @@ function build_result(
     infections = _summarise_gq(fit, :infections, dates, CrIs)
     reports = _summarise_gq(fit, :reports, dates, CrIs)
     rt_df = _summarise_gq(fit, :R, dates, CrIs)
+    rt_unadjusted = _summarise_gq(fit, :R_unadjusted, dates, CrIs)
 
     # Growth rate: log-diff of infections
     growth = _compute_growth_rate(fit, dates, CrIs)
 
     EstimateInfectionsResult(
-        fit, args, data, infections, reports, rt_df, growth, elapsed
+        fit, args, data,
+        infections, reports, rt_df, rt_unadjusted, growth, elapsed,
     )
 end
 

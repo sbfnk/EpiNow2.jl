@@ -482,6 +482,22 @@ using Random
         )
         @test result isa EpiNow2.EstimateInfectionsResult
         @test all(result.infections.mean .> 0)
+        # v1.8: result.rt is depletion-adjusted, result.rt_unadjusted is
+        # the transmission Rt. With non-trivial depletion they should
+        # not be identical (adjusted ≤ unadjusted). Use the median.
+        @test :median in propertynames(result.rt_unadjusted)
+        @test all(result.rt.median .<= result.rt_unadjusted.median .+ 1e-9)
+        # Without depletion the two are identical.
+        result_nopop = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        @test result_nopop.rt.median == result_nopop.rt_unadjusted.median
     end
 
     @testset "prior-predictive mode" begin
