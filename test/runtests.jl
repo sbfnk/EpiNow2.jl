@@ -656,4 +656,51 @@ using Random
         @test :lower_90 in propertynames(result.rt)
         @test !(:lower_20 in propertynames(result.rt))
     end
+
+    @testset "convert_to_logmean / convert_to_logsd" begin
+        # Round-trip a known LogNormal(meanlog=1.0, sdlog=0.5)
+        d = LogNormal(1.0, 0.5)
+        m = mean(d); s = std(d)
+        @test convert_to_logmean(m, s) ≈ 1.0 atol = 1e-10
+        @test convert_to_logsd(m, s) ≈ 0.5 atol = 1e-10
+    end
+
+    @testset "add_breakpoints" begin
+        dates = collect(Date(2024,1,1):Day(1):Date(2024,1,5))
+        df = DataFrame(date=dates, confirm=[10, 12, 15, 18, 20])
+        # No breakpoints: column added, all zero
+        out = add_breakpoints(df)
+        @test :breakpoints in propertynames(out)
+        @test all(out.breakpoints .== 0)
+        # Marked breakpoint
+        out2 = add_breakpoints(df; dates=[Date(2024,1,3)])
+        @test out2.breakpoints == [0, 0, 1, 0, 0]
+        # Multiple breakpoints
+        out3 = add_breakpoints(df; dates=[Date(2024,1,2), Date(2024,1,5)])
+        @test out3.breakpoints == [0, 1, 0, 0, 1]
+        # Date not in data → error
+        @test_throws ArgumentError add_breakpoints(df; dates=[Date(2030,1,1)])
+        # Missing :date column → error
+        @test_throws ArgumentError add_breakpoints(DataFrame(confirm=[1,2]))
+    end
+
+    @testset "filter_leading_zeros" begin
+        dates = collect(Date(2024,1,1):Day(1):Date(2024,1,5))
+        df = DataFrame(date=dates, confirm=[0, 0, 5, 7, 9])
+        out = filter_leading_zeros(df)
+        @test nrow(out) == 3
+        @test out.date[1] == Date(2024,1,3)
+        @test out.confirm == [5, 7, 9]
+        # All zero → empty
+        df0 = DataFrame(date=dates, confirm=zeros(Int, 5))
+        @test nrow(filter_leading_zeros(df0)) == 0
+        # First positive is row 1 → no rows dropped
+        df_clean = DataFrame(date=dates, confirm=[1, 2, 3, 4, 5])
+        @test nrow(filter_leading_zeros(df_clean)) == 5
+        # Custom obs column
+        df_custom = DataFrame(date=dates,
+                              counts=[0, 0, 0, 4, 8])
+        out_c = filter_leading_zeros(df_custom; obs_column=:counts)
+        @test nrow(out_c) == 2
+    end
 end

@@ -73,7 +73,9 @@ export get_samples, get_predictions, get_parameters, get_imputed_reports
 export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
        simulate_infections, forecast_infections, opts_list,
        estimate_dist, bootstrapped_dist_fit,
-       get_regional_results
+       get_regional_results,
+       convert_to_logmean, convert_to_logsd,
+       add_breakpoints, filter_leading_zeros
 
 include("distributions.jl")
 include("options.jl")

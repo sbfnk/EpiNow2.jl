@@ -9,6 +9,74 @@ R = 1 / G(r) where G is the negative MGF of the generation interval.
 growth_to_R(r, gt_pmf) = 1.0 / _neg_mgf(r, gt_pmf)
 
 """
+    convert_to_logmean(mean, sd)
+
+Convert a natural mean and standard deviation to the location parameter
+(`meanlog`) of a lognormal distribution. Mirrors EpiNow2 R's
+`convert_to_logmean()`.
+"""
+convert_to_logmean(mean, sd) = log(mean^2 / sqrt(sd^2 + mean^2))
+
+"""
+    convert_to_logsd(mean, sd)
+
+Convert a natural mean and standard deviation to the scale parameter
+(`sdlog`) of a lognormal distribution. Mirrors EpiNow2 R's
+`convert_to_logsd()`.
+"""
+convert_to_logsd(mean, sd) = sqrt(log(1 + (sd^2 / mean^2)))
+
+"""
+    add_breakpoints(data; dates=Date[])
+
+Return a copy of `data` with a `:breakpoints` column flagging each
+listed date with `1` (others `0`). If a `:breakpoints` column already
+exists it is preserved and the listed dates are merged in. Mirrors
+EpiNow2 R's `add_breakpoints()`.
+"""
+function add_breakpoints(data::DataFrame; dates::AbstractVector{Date} = Date[])
+    :date in propertynames(data) ||
+        throw(ArgumentError("`data` must have a `:date` column"))
+    out = copy(data)
+    if !(:breakpoints in propertynames(out))
+        out.breakpoints = zeros(Int, nrow(out))
+    end
+    if !isempty(dates)
+        missing_dates = setdiff(dates, out.date)
+        isempty(missing_dates) ||
+            throw(ArgumentError(
+                "Breakpoint date(s) not found in data: $(missing_dates)"
+            ))
+        for d in dates
+            out.breakpoints[out.date .== d] .= 1
+        end
+    end
+    return out
+end
+
+"""
+    filter_leading_zeros(data; obs_column=:confirm)
+
+Drop rows from the start of `data` until the first day on which
+`obs_column` is non-zero. Mirrors EpiNow2 R's `filter_leading_zeros()`
+(without the `by =` group argument; add it when needed).
+"""
+function filter_leading_zeros(
+    data::DataFrame;
+    obs_column::Symbol = :confirm,
+)
+    :date in propertynames(data) ||
+        throw(ArgumentError("`data` must have a `:date` column"))
+    obs_column in propertynames(data) ||
+        throw(ArgumentError("`data` must have a `:$obs_column` column"))
+    sorted = sort(data, :date)
+    first_pos = findfirst(x -> !ismissing(x) && x > 0,
+                          sorted[!, obs_column])
+    isnothing(first_pos) && return DataFrame(sorted[1:0, :])
+    return DataFrame(sorted[first_pos:end, :])
+end
+
+"""
     map_prob_change(prob_decrease)
 
 Categorise the posterior probability that Rt is decreasing (i.e. Rt < 1).
