@@ -8,7 +8,8 @@ you re-check a feature; bump the global reference at the top when you
 do a sweep.
 
 **Global parity reference:** EpiNow2 R `main` @ `8454b076` (post-1.8.0
-dev), assessed 2026-04-28.
+dev), assessed 2026-04-28; further gaps closed on `parity-fixes`
+branch the same day (see PR / commit log).
 
 **Status legend:**
 
@@ -31,10 +32,10 @@ reason.
 
 | R function                | .jl status     | Ref commit | Notes |
 |---------------------------|----------------|------------|-------|
-| `epinow()`                | ✅ matched     | 8454b076   | |
-| `estimate_infections()`   | ⚠️ partial     | 8454b076   | Default RW + GP + week effect + NegBin/Poisson works. Backcalc, breakpoints, population depletion, accumulation are wired but minimally tested vs R outputs. |
-| `estimate_secondary()`    | ⚠️ partial     | 8454b076   | Core path works; the v1.8 S3 refactor (`epinowfit` class with `$fit`, `$args`, `$observations`) hasn't been mirrored. |
-| `estimate_truncation()`   | ⚠️ partial     | 8454b076   | Implemented in `truncation.jl`; v1.8 S3 refactor (`obs` → `observations`, `data` → `args`) not yet mirrored. |
+| `epinow()`                | ✅ matched     | 8454b076   | v1.8 S3 args parity via inner `EstimateInfectionsResult.args`. |
+| `estimate_infections()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateInfectionsArgs`). v1.8 adjusted-vs-unadjusted Rt outputs split (`result.rt` is depletion-adjusted; `result.rt_unadjusted` is the transmission Rt). |
+| `estimate_secondary()`    | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateSecondaryArgs`). |
+| `estimate_truncation()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateTruncationArgs`). |
 | `estimate_dist()`         | ⚠️ partial     | 8454b076   | `.jl` has `estimate_dist()` (utilities.jl) using maximum-likelihood fits. R's new `estimate_dist()` (post-1.8) uses Stan/MCMC with proper double censoring via `primarycensored`. Not yet mirrored. |
 | `regional_epinow()`       | ✅ matched     | 8454b076   | |
 | `forecast_infections()`   | ✅ matched     | 8454b076   | |
@@ -67,12 +68,12 @@ reason.
 | Random-walk Rt                             | ✅ matched | 8454b076   | |
 | Gaussian process Rt (HSGP, Matern/SE/periodic) | ✅ matched | 8454b076 | Vendored Matern spectral fix from R 1.6.1. |
 | Breakpoints on Rt                          | ✅ matched | 8454b076   | |
-| Population adjustment / depletion          | ⚠️ partial | 8454b076   | Implemented; v1.8 split into adjusted vs unadjusted Rt outputs not yet mirrored. |
+| Population adjustment / depletion          | ✅ matched | 8454b076   | v1.8 split into `R` (adjusted) and `R_unadjusted` (transmission) honoured. |
 | Day-of-week effect                         | ✅ matched | 8454b076   | |
 | Truncation adjustment                      | ✅ matched | 8454b076   | |
 | Uncertain delay/gt distributions           | ✅ matched | 8454b076   | Sampling-based, with optional prior weighting. |
 | Back-calculation (no Rt)                   | ✅ matched | 8454b076   | |
-| Accumulation of irregularly-reported data  | ⚠️ partial | 8454b076   | `accumulate::Vector{Bool}` column accepted in `EpiData`. R's `fill_missing()` with `initial_accumulate` not yet mirrored as a user-facing helper. |
+| Accumulation of irregularly-reported data  | ✅ matched | 8454b076   | `accumulate::Vector{Bool}` column on `EpiData`, plus user-facing `fill_missing()` helper that auto-detects fixed reporting intervals. |
 | NegBin / Poisson likelihood                | ✅ matched | 8454b076   | |
 | Power-likelihood weighting                 | ✅ matched | 8454b076   | |
 | Initial growth from R0 (v1.7 change)       | ✅ matched | 8454b076   | |
@@ -120,10 +121,10 @@ reason.
 | `prob_decrease()`         | ✅ matched     | 8454b076   | |
 | `bootstrapped_dist_fit()` | ✅ matched     | 8454b076   | |
 | `dist_fit()`              | ⚠️ partial     | 8454b076   | Internal helper; subset surfaced via `estimate_dist()`. |
-| `add_breakpoints()`       | ❌ missing     | 8454b076   | R utility for adding a breakpoints column to a data frame. |
-| `filter_leading_zeros()`  | ❌ missing     | 8454b076   | R-side data-cleaning helper. Argument was deprecated and removed from estimation functions in v1.9; standalone utility still exists. |
-| `fill_missing()`          | ⚠️ partial     | 8454b076   | `.jl` accepts an `accumulate` column on `EpiData`; no user-facing `fill_missing` helper that derives it from intervals. |
-| `convert_to_logmean()`, `convert_to_logsd()` | ❌ missing | 8454b076 | Trivial — easy to add when needed. |
+| `add_breakpoints()`       | ✅ matched     | 8454b076   | |
+| `filter_leading_zeros()`  | ✅ matched     | 8454b076   | `by =` group argument not yet supported. |
+| `fill_missing()`          | ✅ matched     | 8454b076   | Supports `:ignore`/`:accumulate`/`:zero` for both missing dates and observations, plus `initial_accumulate` with auto-detection. |
+| `convert_to_logmean()`, `convert_to_logsd()` | ✅ matched | 8454b076 | |
 | `opts_list()`             | ✅ matched     | 8454b076   | |
 
 ## Deprecated / removed upstream
