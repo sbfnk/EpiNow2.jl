@@ -55,6 +55,126 @@ function add_breakpoints(data::DataFrame; dates::AbstractVector{Date} = Date[])
 end
 
 """
+    fill_missing(data; missing_dates=:ignore, missing_obs=:ignore,
+                 initial_accumulate=nothing, obs_column=:confirm)
+
+Fill date gaps and/or missing observations in a long-format counts
+DataFrame, returning a copy with an `accumulate` column suitable for
+passing to `estimate_infections()`. Mirrors EpiNow2 R's `fill_missing()`.
+
+`missing_dates` and `missing_obs` each take one of:
+
+- `:ignore`  — leave gaps / missing values as is
+- `:accumulate` — flag the gap (or missing) row as `accumulate=true`,
+  meaning the model rolls its expected report forward into the next
+  non-accumulate observation
+- `:zero`    — insert (or replace) with `0`
+
+`initial_accumulate` extends the data backwards by that many days at
+the start, all flagged as `accumulate=true`. If omitted and the data
+have a single fixed date interval > 1 day, that interval is used
+automatically.
+
+# Example
+```julia
+# Weekly aggregate data → daily grid with the first six days of each
+# week flagged as accumulated
+fill_missing(
+    DataFrame(date = Date(2024,1,1):Day(7):Date(2024,1,29),
+              confirm = [50, 70, 65, 80, 60]);
+    missing_dates = :accumulate,
+)
+```
+"""
+function fill_missing(
+    data::DataFrame;
+    missing_dates::Symbol = :ignore,
+    missing_obs::Symbol = :ignore,
+    initial_accumulate::Union{Int, Nothing} = nothing,
+    obs_column::Symbol = :confirm,
+)
+    :date in propertynames(data) ||
+        throw(ArgumentError("`data` must have a `:date` column"))
+    obs_column in propertynames(data) ||
+        throw(ArgumentError("`data` must have a `:$obs_column` column"))
+    :accumulate in propertynames(data) &&
+        throw(ArgumentError(
+            "`data` already has an `accumulate` column"
+        ))
+    missing_dates in (:ignore, :accumulate, :zero) ||
+        throw(ArgumentError(
+            "`missing_dates` must be :ignore, :accumulate, or :zero"
+        ))
+    missing_obs in (:ignore, :accumulate, :zero) ||
+        throw(ArgumentError(
+            "`missing_obs` must be :ignore, :accumulate, or :zero"
+        ))
+
+    sorted = sort(data, :date)
+
+    # Auto-detect a fixed reporting interval > 1 day for initial_accumulate
+    init = initial_accumulate
+    if isnothing(init) && nrow(sorted) > 1
+        diffs = unique(diff(sorted.date))
+        if length(diffs) == 1 && Dates.value(diffs[1]) > 1
+            init = Dates.value(diffs[1])
+        end
+    end
+    init_n = isnothing(init) ? 1 : init
+    init_n >= 1 ||
+        throw(ArgumentError("`initial_accumulate` must be ≥ 1"))
+
+    start = sorted.date[1] - Day(init_n - 1)
+    stop  = sorted.date[end]
+    full_dates = collect(start:Day(1):stop)
+
+    present = Set(sorted.date)
+    obs_lookup = Dict(d => v for (d, v) in zip(sorted.date, sorted[!, obs_column]))
+
+    obs_eltype = eltype(sorted[!, obs_column])
+    fill_val = obs_eltype <: Union{Missing, Real} ? missing : zero(obs_eltype)
+
+    out = DataFrame(date = full_dates)
+    out[!, obs_column] = Vector{Union{obs_eltype, Missing}}(undef, length(full_dates))
+    out.accumulate = falses(length(full_dates))
+
+    for (i, d) in enumerate(full_dates)
+        if d in present
+            v = obs_lookup[d]
+            out[i, obs_column] = v
+            if ismissing(v)
+                if missing_obs == :zero
+                    out[i, obs_column] = zero(obs_eltype)
+                elseif missing_obs == :accumulate
+                    out.accumulate[i] = true
+                end
+            end
+        else
+            # Date was missing in input
+            if missing_dates == :zero
+                out[i, obs_column] = zero(obs_eltype)
+            elseif missing_dates == :accumulate
+                out[i, obs_column] = missing
+                out.accumulate[i] = true
+            else  # :ignore — but we already added the row; restore as missing
+                out[i, obs_column] = missing
+            end
+        end
+    end
+
+    # When detecting interval automatically and init was applied, also
+    # mark the initial padded days as accumulate (so they roll into the
+    # first observation rather than being dropped from the likelihood).
+    if !isnothing(init)
+        for i in 1:(init_n - 1)
+            out.accumulate[i] = true
+        end
+    end
+
+    return out
+end
+
+"""
     filter_leading_zeros(data; obs_column=:confirm)
 
 Drop rows from the start of `data` until the first day on which
