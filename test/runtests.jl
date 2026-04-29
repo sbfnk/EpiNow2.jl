@@ -641,13 +641,26 @@ using Random
         preds = get_predictions(result; format=:summary)
         @test preds isa DataFrame
 
-        # :sample format
+        # :sample format — scoringutils-compatible shape
         samp = get_predictions(result; format=:sample)
-        @test :sample in propertynames(samp)
+        @test names(samp) == ["forecast_date", "date", "horizon",
+                              "sample", "predicted"]
+        @test all(samp.forecast_date .== result.observations.date[end])
+        @test all(samp.horizon .== Dates.value.(samp.date .- samp.forecast_date))
 
-        # :quantile format
+        # :quantile format — scoringutils-compatible shape
         quant = get_predictions(result; format=:quantile)
-        @test quant isa DataFrame
+        @test names(quant) == ["forecast_date", "date", "horizon",
+                               "quantile_level", "predicted"]
+        # Default quantile levels match R: 5/25/50/75/95
+        @test sort(unique(quant.quantile_level)) ==
+              [0.05, 0.25, 0.5, 0.75, 0.95]
+
+        # Custom quantile levels
+        custom_q = get_predictions(
+            result; format=:quantile, quantiles=[0.1, 0.5, 0.9]
+        )
+        @test sort(unique(custom_q.quantile_level)) == [0.1, 0.5, 0.9]
 
         # invalid format
         @test_throws ArgumentError get_predictions(result; format=:invalid)

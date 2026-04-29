@@ -129,25 +129,72 @@ get_samples(result::EpinowResult; kwargs...) =
     get_samples(result.estimates; kwargs...)
 
 """
-    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9])
+    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9],
+                    quantiles=[0.05, 0.25, 0.5, 0.75, 0.95])
 
-Extract case predictions.
+Extract case predictions in one of three formats:
+
+- `:summary` — pre-computed posterior summary (`result.reports`).
+  `CrIs` controls the credible-interval columns surfaced.
+- `:sample` — long-format posterior samples ready for
+  `scoringutils::as_forecast_sample()`. Columns: `forecast_date`, `date`,
+  `horizon`, `sample`, `predicted`.
+- `:quantile` — quantile predictions ready for
+  `scoringutils::as_forecast_quantile()`. Columns: `forecast_date`,
+  `date`, `horizon`, `quantile_level`, `predicted`. `quantiles`
+  controls the quantile levels.
 """
 function get_predictions(
     result::EstimateInfectionsResult;
     format::Symbol=:summary,
-    CrIs::Vector{Float64}=[0.2, 0.5, 0.9]
+    CrIs::Vector{Float64}=[0.2, 0.5, 0.9],
+    quantiles::Vector{Float64}=[0.05, 0.25, 0.5, 0.75, 0.95],
 )
     if format == :summary
         return result.reports
     elseif format == :sample
-        return get_samples(result; variable=:reports)
+        samples = get_samples(result; variable=:reports)
+        return _format_sample_predictions(samples, result)
     elseif format == :quantile
         samples = get_samples(result; variable=:reports)
-        return _samples_to_quantiles(samples, CrIs)
+        return _format_quantile_predictions(samples, quantiles, result)
     else
-        throw(ArgumentError("Unknown format: $format. Use :summary, :sample, or :quantile"))
+        throw(ArgumentError(
+            "Unknown format: $format. Use :summary, :sample, or :quantile"
+        ))
     end
+end
+
+function _format_sample_predictions(samples::DataFrame, result)
+    forecast_date = result.observations.date[end]
+    DataFrame(
+        forecast_date = fill(forecast_date, nrow(samples)),
+        date = samples.date,
+        horizon = Dates.value.(samples.date .- forecast_date),
+        sample = samples.sample,
+        predicted = samples.value,
+    )
+end
+
+function _format_quantile_predictions(
+    samples::DataFrame, quantiles::Vector{Float64}, result,
+)
+    forecast_date = result.observations.date[end]
+    grouped = groupby(samples, :date)
+    rows = NamedTuple[]
+    for g in grouped
+        d = g.date[1]
+        for q in quantiles
+            push!(rows, (
+                forecast_date = forecast_date,
+                date = d,
+                horizon = Dates.value(d - forecast_date),
+                quantile_level = q,
+                predicted = quantile(g.value, q),
+            ))
+        end
+    end
+    DataFrame(rows)
 end
 
 """
