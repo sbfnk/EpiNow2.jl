@@ -75,7 +75,8 @@ export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
        estimate_dist, bootstrapped_dist_fit,
        get_regional_results,
        convert_to_logmean, convert_to_logsd,
-       add_breakpoints, filter_leading_zeros, fill_missing
+       add_breakpoints, filter_leading_zeros, fill_missing,
+       calc_CrI, calc_CrIs, calc_summary_stats, calc_summary_measures
 
 include("distributions.jl")
 include("options.jl")

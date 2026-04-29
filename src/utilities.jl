@@ -419,6 +419,112 @@ function _fit_family(family::Symbol, data::AbstractVector{Float64})
 end
 
 """
+    calc_CrI(samples; by=nothing, CrI=0.9, value_col=:value)
+
+Compute a single credible interval for a long-format `samples` DataFrame
+(columns include `value_col`, optionally a grouping column `by`).
+Returns a DataFrame with the grouping columns plus `lower_X` and
+`upper_X`, where `X = round(100*CrI)`. Mirrors EpiNow2 R's `calc_CrI()`.
+"""
+function calc_CrI(
+    samples::DataFrame;
+    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+    CrI::Float64 = 0.9,
+    value_col::Symbol = :value,
+)
+    half = CrI / 2
+    lo, hi = 0.5 - half, 0.5 + half
+    pct = round(Int, 100 * CrI)
+    lo_col, hi_col = Symbol("lower_$pct"), Symbol("upper_$pct")
+
+    if isnothing(by)
+        return DataFrame(
+            (lo_col => quantile(samples[!, value_col], lo),
+             hi_col => quantile(samples[!, value_col], hi))...
+        )
+    end
+    by_vec = by isa Symbol ? [by] : by
+    combine(groupby(samples, by_vec),
+        value_col => (v -> quantile(v, lo)) => lo_col,
+        value_col => (v -> quantile(v, hi)) => hi_col,
+    )
+end
+
+"""
+    calc_CrIs(samples; by=nothing, CrIs=[0.2, 0.5, 0.9], value_col=:value)
+
+Compute multiple credible intervals at once, returning a DataFrame with
+the grouping columns plus pairs of `lower_X` / `upper_X` columns for
+each CrI in `CrIs`. Mirrors EpiNow2 R's `calc_CrIs()`.
+"""
+function calc_CrIs(
+    samples::DataFrame;
+    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+    value_col::Symbol = :value,
+)
+    sorted_CrIs = sort(CrIs)
+    pieces = [
+        calc_CrI(samples; by = by, CrI = cri, value_col = value_col)
+        for cri in sorted_CrIs
+    ]
+    if isnothing(by)
+        return hcat(pieces...)
+    end
+    by_vec = by isa Symbol ? [by] : by
+    out = pieces[1]
+    for p in pieces[2:end]
+        out = innerjoin(out, p, on = by_vec)
+    end
+    out
+end
+
+"""
+    calc_summary_stats(samples; by=nothing, value_col=:value)
+
+Compute median, mean and standard deviation for a long-format `samples`
+DataFrame. Mirrors EpiNow2 R's `calc_summary_stats()`.
+"""
+function calc_summary_stats(
+    samples::DataFrame;
+    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+    value_col::Symbol = :value,
+)
+    if isnothing(by)
+        v = samples[!, value_col]
+        return DataFrame(median = median(v), mean = mean(v), sd = std(v))
+    end
+    by_vec = by isa Symbol ? [by] : by
+    combine(groupby(samples, by_vec),
+        value_col => median => :median,
+        value_col => mean   => :mean,
+        value_col => std    => :sd,
+    )
+end
+
+"""
+    calc_summary_measures(samples; by=nothing, CrIs=[0.2, 0.5, 0.9],
+                          value_col=:value)
+
+Join `calc_summary_stats()` and `calc_CrIs()` into a single summary
+DataFrame. Mirrors EpiNow2 R's `calc_summary_measures()`.
+"""
+function calc_summary_measures(
+    samples::DataFrame;
+    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+    value_col::Symbol = :value,
+)
+    stats = calc_summary_stats(samples; by, value_col)
+    cris  = calc_CrIs(samples; by, CrIs, value_col)
+    if isnothing(by)
+        return hcat(stats, cris)
+    end
+    by_vec = by isa Symbol ? [by] : by
+    innerjoin(stats, cris; on = by_vec)
+end
+
+"""
     bootstrapped_dist_fit(data; family, max_delay, n_bootstraps)
 
 Fit a delay distribution with bootstrap uncertainty quantification.

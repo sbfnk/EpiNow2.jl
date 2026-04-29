@@ -787,6 +787,48 @@ using Random
         @test result.args.inference.samples == 20
     end
 
+    @testset "calc_CrI / calc_CrIs / calc_summary_*" begin
+        Random.seed!(42)
+        # Two groups, each with 1000 samples, known parameters
+        n = 1000
+        df = vcat(
+            DataFrame(group = fill(:a, n), value = randn(n)),
+            DataFrame(group = fill(:b, n), value = randn(n) .+ 5),
+        )
+
+        # Single CrI, no grouping
+        ci = calc_CrI(df; CrI = 0.9)
+        @test names(ci) == ["lower_90", "upper_90"]
+        @test ci.lower_90[1] ≈ quantile(df.value, 0.05) atol = 1e-10
+        @test ci.upper_90[1] ≈ quantile(df.value, 0.95) atol = 1e-10
+
+        # Single CrI, by group
+        ci_g = calc_CrI(df; by = :group, CrI = 0.5)
+        @test sort(names(ci_g)) == sort(["group", "lower_50", "upper_50"])
+        @test nrow(ci_g) == 2
+
+        # Multiple CrIs
+        cis = calc_CrIs(df; by = :group, CrIs = [0.5, 0.9])
+        @test "lower_50" in names(cis) && "upper_90" in names(cis)
+        @test nrow(cis) == 2
+
+        # Summary stats
+        stats = calc_summary_stats(df; by = :group)
+        @test sort(names(stats)) == sort(["group", "median", "mean", "sd"])
+        @test nrow(stats) == 2
+        # Group :b mean should be near 5
+        b_row = stats[stats.group .== :b, :]
+        @test b_row.mean[1] ≈ 5.0 atol = 0.2
+
+        # Summary measures (joined)
+        meas = calc_summary_measures(df; by = :group, CrIs = [0.5, 0.9])
+        for col in ["group", "median", "mean", "sd",
+                    "lower_50", "upper_50", "lower_90", "upper_90"]
+            @test col in names(meas)
+        end
+        @test nrow(meas) == 2
+    end
+
     @testset "convert_to_logmean / convert_to_logsd" begin
         # Round-trip a known LogNormal(meanlog=1.0, sdlog=0.5)
         d = LogNormal(1.0, 0.5)
