@@ -558,16 +558,38 @@ using Random
         @test all(result.infections .> 0)
     end
 
-    @testset "estimate_dist and bootstrapped_dist_fit" begin
+    @testset "estimate_dist (MCMC, censored)" begin
+        Random.seed!(42)
+        # 200 noisy daily-grid lognormal delays
+        delays = round.(Int, rand(LogNormal(1.5, 0.5), 200))
+        delays = clamp.(delays, 0, 30)
+        data = DataFrame(delay=delays)
+
+        result = estimate_dist(
+            data;
+            dist=:lognormal,
+            inference=inference_opts(
+                samples=200, warmup=200, chains=1, progress=false
+            ),
+            verbose=false,
+        )
+        @test result isa EpiNow2.EstimateDistResult
+        @test result.fitted isa UncertainDistribution
+        @test length(result.fitted.param_priors) == 2
+        # Posterior mean of meanlog should land near the truth (1.5).
+        meanlog_prior = result.fitted.param_priors[1]
+        @test 1.0 < mean(meanlog_prior) < 2.0
+        # args round-trip
+        @test result.args.dist == :lognormal
+    end
+
+    @testset "bootstrapped_dist_fit" begin
         Random.seed!(42)
         delays = rand(LogNormal(1.5, 0.5), 200)
         data = DataFrame(delay=delays)
 
-        d = estimate_dist(data; family=:lognormal, max_delay=30)
-        @test d isa LogNormal
-        @test 1.0 < d.μ < 2.0
-
-        ud = bootstrapped_dist_fit(data; family=:lognormal, max_delay=30, n_bootstraps=20)
+        ud = bootstrapped_dist_fit(data; family=:lognormal, max_delay=30,
+                                    n_bootstraps=20)
         @test ud isa UncertainDistribution
         @test length(ud.param_priors) == 2
     end

@@ -419,29 +419,6 @@ function _fit_family(family::Symbol, data::AbstractVector{Float64})
 end
 
 """
-    estimate_dist(data; family, max_delay)
-
-Fit a delay distribution to line-list data using maximum likelihood.
-
-# Arguments
-- `data::DataFrame` — must have columns for event dates (e.g. `:date_onset`, `:date_report`)
-  or a single `:delay` column with pre-computed delays
-- `family::Symbol` — `:lognormal` (default) or `:gamma`
-- `max_delay::Int` — maximum delay to consider (default: 30)
-
-# Returns
-A fitted `Distribution` (LogNormal or Gamma).
-"""
-function estimate_dist(
-    data::DataFrame;
-    family::Symbol = :lognormal,
-    max_delay::Int = 30
-)
-    valid = _extract_delays(data; max_delay)
-    _fit_family(family, valid)
-end
-
-"""
     bootstrapped_dist_fit(data; family, max_delay, n_bootstraps)
 
 Fit a delay distribution with bootstrap uncertainty quantification.

@@ -88,6 +88,7 @@ include("secondary.jl")
 include("truncation.jl")
 include("regional.jl")
 include("utilities.jl")
+include("estimate_dist.jl")
 include("r_bridge.jl")
 
 # Stubs for plotting functions (implemented by CairoMakie extension)
