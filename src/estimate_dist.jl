@@ -8,7 +8,7 @@
 # `primarycensored` R package).
 # ══════════════════════════════════════════════════════════════════════════
 
-using CensoredDistributions: double_interval_censored
+using CensoredDistributions: double_interval_censored, ExponentiallyTilted
 
 """
     EstimateDistArgs
@@ -20,6 +20,7 @@ struct EstimateDistArgs
     dist::Symbol
     priors::Vector{<:Distribution}
     primary::Symbol
+    primary_params::Vector{Float64}
     inference::InferenceOpts
     obs_time_threshold::Float64
 end
@@ -44,24 +45,45 @@ end
 
 function _default_priors(dist::Symbol)
     if dist == :lognormal
-        Distribution[Normal(1.0, 1.0), truncated(Normal(0.5, 0.5); lower=0.01)]
+        # meanlog ~ Normal(1, 1); sdlog ~ HalfNormal(0.5)
+        Distribution[Normal(1.0, 1.0),
+                     truncated(Normal(0.5, 0.5); lower=0.01)]
     elseif dist == :gamma
+        # shape ~ HalfNormal(2); rate ~ HalfNormal(0.5)  (matches R)
         Distribution[truncated(Normal(2.0, 2.0); lower=0.01),
                      truncated(Normal(0.5, 0.5); lower=0.01)]
+    elseif dist == :normal
+        # mean ~ Normal(5, 5); sd ~ HalfNormal(1)
+        Distribution[Normal(5.0, 5.0),
+                     truncated(Normal(1.0, 1.0); lower=0.01)]
+    elseif dist == :exp
+        # rate ~ HalfNormal(0.5)
+        Distribution[truncated(Normal(0.5, 0.5); lower=0.01)]
+    elseif dist == :weibull
+        # shape ~ HalfNormal(2); scale ~ HalfNormal(5)
+        Distribution[truncated(Normal(2.0, 2.0); lower=0.01),
+                     truncated(Normal(5.0, 5.0); lower=0.01)]
     else
         throw(ArgumentError(
-            "estimate_dist currently supports :lognormal and :gamma. " *
-            "For others use a custom Turing model with " *
-            "CensoredDistributions.double_interval_censored."
+            "estimate_dist supports :lognormal, :gamma, :normal, :exp, " *
+            "and :weibull"
         ))
     end
 end
 
 function _dist_constructor(dist::Symbol)
     if dist == :lognormal
-        (a, b) -> LogNormal(a, b)
+        (meanlog, sdlog) -> LogNormal(meanlog, sdlog)
     elseif dist == :gamma
-        (a, b) -> Gamma(a, b)
+        # R uses rate parameterisation; Distributions.jl's Gamma takes
+        # (α=shape, θ=scale), so convert rate → 1/rate.
+        (shape, rate) -> Gamma(shape, 1.0 / rate)
+    elseif dist == :normal
+        (μ, σ) -> Normal(μ, σ)
+    elseif dist == :exp
+        rate -> Exponential(1.0 / rate)
+    elseif dist == :weibull
+        (shape, scale) -> Weibull(shape, scale)
     else
         throw(ArgumentError("Unsupported dist: $dist"))
     end
@@ -122,6 +144,21 @@ end
 
 # ── Turing model ────────────────────────────────────────────────────────────
 
+function _make_primary_event(primary::Symbol, pwindow::Real,
+                             primary_params::Vector{Float64})
+    if primary == :uniform
+        return Uniform(0.0, Float64(pwindow))
+    elseif primary == :expgrowth
+        # Single fixed growth rate parameter, passed through (not estimated).
+        return ExponentiallyTilted(0.0, Float64(pwindow),
+                                   Float64(primary_params[1]))
+    else
+        throw(ArgumentError(
+            "primary must be :uniform or :expgrowth, got $primary"
+        ))
+    end
+end
+
 @model function _dist_likelihood(
     delay_lwr::Vector{Int},
     pwindow::Vector{Int},
@@ -129,6 +166,8 @@ end
     weight::Vector{Int},
     constructor::Function,
     priors::Vector{<:Distribution},
+    primary::Symbol,
+    primary_params::Vector{Float64},
 )
     n_params = length(priors)
     params = Vector{Real}(undef, n_params)
@@ -139,7 +178,9 @@ end
     for i in eachindex(delay_lwr)
         cens = double_interval_censored(
             base;
-            primary_event = Uniform(0.0, Float64(pwindow[i])),
+            primary_event = _make_primary_event(
+                primary, pwindow[i], primary_params
+            ),
             upper = obs_time[i],
             interval = 1.0,
         )
@@ -192,14 +233,20 @@ function estimate_dist(
     dist::Symbol = :lognormal,
     priors::Union{Vector{<:Distribution}, Nothing} = nothing,
     primary::Symbol = :uniform,
+    primary_params::Vector{Float64} = Float64[],
     obs_time_threshold::Float64 = 2.0,
     inference::InferenceOpts = inference_opts(),
     verbose::Bool = false,
 )
-    primary == :uniform || throw(ArgumentError(
-        "Only `primary=:uniform` is currently supported (R supports " *
-        "`expgrowth` with a fixed growth rate)."
+    primary in (:uniform, :expgrowth) || throw(ArgumentError(
+        "primary must be :uniform or :expgrowth, got $primary"
     ))
+    if primary == :expgrowth && length(primary_params) != 1
+        throw(ArgumentError(
+            "primary_params must contain exactly one growth rate when " *
+            "primary = :expgrowth"
+        ))
+    end
 
     obs = _normalise_dist_data(data)
     isempty(obs) && throw(ArgumentError("No observations after preprocessing"))
@@ -217,7 +264,7 @@ function estimate_dist(
 
     model = _dist_likelihood(
         obs.delay_lwr, obs.pwindow, obs.obs_time, obs.n,
-        constructor, used_priors,
+        constructor, used_priors, primary, primary_params,
     )
 
     sampler = NUTS(
@@ -267,7 +314,8 @@ function estimate_dist(
     )
 
     args = EstimateDistArgs(
-        dist, used_priors, primary, inference, obs_time_threshold,
+        dist, used_priors, primary, primary_params,
+        inference, obs_time_threshold,
     )
     EstimateDistResult(chain, args, obs, fitted, elapsed)
 end

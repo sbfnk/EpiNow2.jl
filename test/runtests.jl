@@ -581,6 +581,52 @@ using Random
         @test 1.0 < mean(meanlog_prior) < 2.0
         # args round-trip
         @test result.args.dist == :lognormal
+
+        # Gamma family — using rate parameterisation matching R
+        Random.seed!(42)
+        gam_delays = round.(Int, rand(Gamma(2.0, 2.0), 200))  # mean = shape*scale = 4
+        gam_data = DataFrame(delay=clamp.(gam_delays, 0, 30))
+        gres = estimate_dist(
+            gam_data; dist=:gamma,
+            inference=inference_opts(samples=200, warmup=200,
+                                     chains=1, progress=false),
+            verbose=false,
+        )
+        @test gres.args.dist == :gamma
+        @test length(gres.fitted.param_priors) == 2
+
+        # expgrowth primary — fixed growth rate, single arg
+        Random.seed!(42)
+        expg_data = DataFrame(delay=clamp.(round.(Int,
+            rand(LogNormal(1.5, 0.5), 100)), 0, 30))
+        eres = estimate_dist(
+            expg_data; dist=:lognormal,
+            primary=:expgrowth, primary_params=[0.1],
+            inference=inference_opts(samples=200, warmup=200,
+                                     chains=1, progress=false),
+            verbose=false,
+        )
+        @test eres.args.primary == :expgrowth
+        @test eres.args.primary_params == [0.1]
+
+        # Validation: expgrowth without primary_params errors
+        @test_throws ArgumentError estimate_dist(
+            data; dist=:lognormal, primary=:expgrowth,
+            inference=inference_opts(samples=2, warmup=2, chains=1,
+                                     progress=false),
+        )
+        # Unknown primary errors
+        @test_throws ArgumentError estimate_dist(
+            data; primary=:bogus,
+            inference=inference_opts(samples=2, warmup=2, chains=1,
+                                     progress=false),
+        )
+        # Unknown dist errors
+        @test_throws ArgumentError estimate_dist(
+            data; dist=:bogus,
+            inference=inference_opts(samples=2, warmup=2, chains=1,
+                                     progress=false),
+        )
     end
 
     @testset "bootstrapped_dist_fit" begin
