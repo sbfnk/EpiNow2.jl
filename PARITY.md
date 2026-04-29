@@ -93,7 +93,7 @@ reason.
 | R function                | .jl status      | Ref commit | Notes |
 |---------------------------|-----------------|------------|-------|
 | `get_samples()`           | ✅ matched      | 8454b076   | |
-| `get_predictions()`       | ⚠️ partial      | 8454b076   | v1.8 added `format` arg for scoringutils (`"summary"`/`"sample"`/`"quantile"`). `.jl` returns DataFrame; multiple formats not exposed. |
+| `get_predictions()`       | ✅ matched      | 8454b076   | All three formats present (`:summary`/`:sample`/`:quantile`); `:sample` and `:quantile` use scoringutils-compatible columns. |
 | `get_parameters()`        | ✅ matched      | 8454b076   | |
 | `get_imputed_reports()`   | ✅ matched      | 8454b076   | |
 | `get_regional_results()`  | ✅ matched      | 8454b076   | |
