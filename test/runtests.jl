@@ -277,6 +277,10 @@ using Random
 
         @test result isa EpiNow2.EstimateSecondaryResult
         @test nrow(result.predictions) > 0
+        # v1.8 epinowfit parity: args round-trip
+        @test result.args isa EpiNow2.EstimateSecondaryArgs
+        @test result.args.burn_in == 10
+        @test result.args.obs.week_effect == false
     end
 
     @testset "estimate_truncation" begin
@@ -309,6 +313,9 @@ using Random
 
         @test result isa EpiNow2.EstimateTruncationResult
         @test result.dist isa LogNormal
+        # v1.8 epinowfit parity: args round-trip
+        @test result.args isa EpiNow2.EstimateTruncationArgs
+        @test result.args.inference.samples == 100
     end
 
     @testset "epinow end-to-end" begin
@@ -482,6 +489,22 @@ using Random
         )
         @test result isa EpiNow2.EstimateInfectionsResult
         @test all(result.infections.mean .> 0)
+        # v1.8: result.rt is depletion-adjusted, result.rt_unadjusted is
+        # the transmission Rt. With non-trivial depletion they should
+        # not be identical (adjusted ≤ unadjusted). Use the median.
+        @test :median in propertynames(result.rt_unadjusted)
+        @test all(result.rt.median .<= result.rt_unadjusted.median .+ 1e-9)
+        # Without depletion the two are identical.
+        result_nopop = estimate_infections(
+            _test_data();
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = _fast_inference(),
+            verbose=false
+        )
+        @test result_nopop.rt.median == result_nopop.rt_unadjusted.median
     end
 
     @testset "prior-predictive mode" begin
@@ -535,16 +558,84 @@ using Random
         @test all(result.infections .> 0)
     end
 
-    @testset "estimate_dist and bootstrapped_dist_fit" begin
+    @testset "estimate_dist (MCMC, censored)" begin
+        Random.seed!(42)
+        # 200 noisy daily-grid lognormal delays
+        delays = round.(Int, rand(LogNormal(1.5, 0.5), 200))
+        delays = clamp.(delays, 0, 30)
+        data = DataFrame(delay=delays)
+
+        result = estimate_dist(
+            data;
+            dist=:lognormal,
+            inference=inference_opts(
+                samples=200, warmup=200, chains=1, progress=false
+            ),
+            verbose=false,
+        )
+        @test result isa EpiNow2.EstimateDistResult
+        @test result.fitted isa UncertainDistribution
+        @test length(result.fitted.param_priors) == 2
+        # Posterior mean of meanlog should land near the truth (1.5).
+        meanlog_prior = result.fitted.param_priors[1]
+        @test 1.0 < mean(meanlog_prior) < 2.0
+        # args round-trip
+        @test result.args.dist == :lognormal
+
+        # Gamma family — using rate parameterisation matching R
+        Random.seed!(42)
+        gam_delays = round.(Int, rand(Gamma(2.0, 2.0), 200))  # mean = shape*scale = 4
+        gam_data = DataFrame(delay=clamp.(gam_delays, 0, 30))
+        gres = estimate_dist(
+            gam_data; dist=:gamma,
+            inference=inference_opts(samples=200, warmup=200,
+                                     chains=1, progress=false),
+            verbose=false,
+        )
+        @test gres.args.dist == :gamma
+        @test length(gres.fitted.param_priors) == 2
+
+        # expgrowth primary — fixed growth rate, single arg
+        Random.seed!(42)
+        expg_data = DataFrame(delay=clamp.(round.(Int,
+            rand(LogNormal(1.5, 0.5), 100)), 0, 30))
+        eres = estimate_dist(
+            expg_data; dist=:lognormal,
+            primary=:expgrowth, primary_params=[0.1],
+            inference=inference_opts(samples=200, warmup=200,
+                                     chains=1, progress=false),
+            verbose=false,
+        )
+        @test eres.args.primary == :expgrowth
+        @test eres.args.primary_params == [0.1]
+
+        # Validation: expgrowth without primary_params errors
+        @test_throws ArgumentError estimate_dist(
+            data; dist=:lognormal, primary=:expgrowth,
+            inference=inference_opts(samples=2, warmup=2, chains=1,
+                                     progress=false),
+        )
+        # Unknown primary errors
+        @test_throws ArgumentError estimate_dist(
+            data; primary=:bogus,
+            inference=inference_opts(samples=2, warmup=2, chains=1,
+                                     progress=false),
+        )
+        # Unknown dist errors
+        @test_throws ArgumentError estimate_dist(
+            data; dist=:bogus,
+            inference=inference_opts(samples=2, warmup=2, chains=1,
+                                     progress=false),
+        )
+    end
+
+    @testset "bootstrapped_dist_fit" begin
         Random.seed!(42)
         delays = rand(LogNormal(1.5, 0.5), 200)
         data = DataFrame(delay=delays)
 
-        d = estimate_dist(data; family=:lognormal, max_delay=30)
-        @test d isa LogNormal
-        @test 1.0 < d.μ < 2.0
-
-        ud = bootstrapped_dist_fit(data; family=:lognormal, max_delay=30, n_bootstraps=20)
+        ud = bootstrapped_dist_fit(data; family=:lognormal, max_delay=30,
+                                    n_bootstraps=20)
         @test ud isa UncertainDistribution
         @test length(ud.param_priors) == 2
     end
@@ -618,13 +709,26 @@ using Random
         preds = get_predictions(result; format=:summary)
         @test preds isa DataFrame
 
-        # :sample format
+        # :sample format — scoringutils-compatible shape
         samp = get_predictions(result; format=:sample)
-        @test :sample in propertynames(samp)
+        @test names(samp) == ["forecast_date", "date", "horizon",
+                              "sample", "predicted"]
+        @test all(samp.forecast_date .== result.observations.date[end])
+        @test all(samp.horizon .== Dates.value.(samp.date .- samp.forecast_date))
 
-        # :quantile format
+        # :quantile format — scoringutils-compatible shape
         quant = get_predictions(result; format=:quantile)
-        @test quant isa DataFrame
+        @test names(quant) == ["forecast_date", "date", "horizon",
+                               "quantile_level", "predicted"]
+        # Default quantile levels match R: 5/25/50/75/95
+        @test sort(unique(quant.quantile_level)) ==
+              [0.05, 0.25, 0.5, 0.75, 0.95]
+
+        # Custom quantile levels
+        custom_q = get_predictions(
+            result; format=:quantile, quantiles=[0.1, 0.5, 0.9]
+        )
+        @test sort(unique(custom_q.quantile_level)) == [0.1, 0.5, 0.9]
 
         # invalid format
         @test_throws ArgumentError get_predictions(result; format=:invalid)
@@ -655,5 +759,175 @@ using Random
         @test :lower_50 in propertynames(result.rt)
         @test :lower_90 in propertynames(result.rt)
         @test !(:lower_20 in propertynames(result.rt))
+    end
+
+    @testset "result has args field (v1.8 epinowfit parity)" begin
+        Random.seed!(42)
+        n_days = 30
+        dates = collect(Date(2024,1,1):Day(1):Date(2024,1,n_days))
+        cases = round.(Int, 100 .* exp.(0.05 .* (1:n_days)))
+        df = DataFrame(date=dates, confirm=cases)
+
+        result = estimate_infections(
+            df;
+            generation_time = gt_opts(LogNormal(1.6, 0.5)),
+            delays = delay_opts(Dirac(0.0)),
+            obs = obs_opts(week_effect=false),
+            forecast = forecast_opts(horizon=0),
+            inference = inference_opts(
+                samples=20, warmup=20, chains=1, progress=false
+            ),
+            verbose = false,
+        )
+        @test hasproperty(result, :args)
+        @test result.args isa EpiNow2.EstimateInfectionsArgs
+        # Round-trip a few key configuration choices
+        @test result.args.forecast.horizon == 0
+        @test result.args.obs.week_effect == false
+        @test result.args.inference.samples == 20
+    end
+
+    @testset "calc_CrI / calc_CrIs / calc_summary_*" begin
+        Random.seed!(42)
+        # Two groups, each with 1000 samples, known parameters
+        n = 1000
+        df = vcat(
+            DataFrame(group = fill(:a, n), value = randn(n)),
+            DataFrame(group = fill(:b, n), value = randn(n) .+ 5),
+        )
+
+        # Single CrI, no grouping
+        ci = calc_CrI(df; CrI = 0.9)
+        @test names(ci) == ["lower_90", "upper_90"]
+        @test ci.lower_90[1] ≈ quantile(df.value, 0.05) atol = 1e-10
+        @test ci.upper_90[1] ≈ quantile(df.value, 0.95) atol = 1e-10
+
+        # Single CrI, by group
+        ci_g = calc_CrI(df; by = :group, CrI = 0.5)
+        @test sort(names(ci_g)) == sort(["group", "lower_50", "upper_50"])
+        @test nrow(ci_g) == 2
+
+        # Multiple CrIs
+        cis = calc_CrIs(df; by = :group, CrIs = [0.5, 0.9])
+        @test "lower_50" in names(cis) && "upper_90" in names(cis)
+        @test nrow(cis) == 2
+
+        # Summary stats
+        stats = calc_summary_stats(df; by = :group)
+        @test sort(names(stats)) == sort(["group", "median", "mean", "sd"])
+        @test nrow(stats) == 2
+        # Group :b mean should be near 5
+        b_row = stats[stats.group .== :b, :]
+        @test b_row.mean[1] ≈ 5.0 atol = 0.2
+
+        # Summary measures (joined)
+        meas = calc_summary_measures(df; by = :group, CrIs = [0.5, 0.9])
+        for col in ["group", "median", "mean", "sd",
+                    "lower_50", "upper_50", "lower_90", "upper_90"]
+            @test col in names(meas)
+        end
+        @test nrow(meas) == 2
+    end
+
+    @testset "convert_to_logmean / convert_to_logsd" begin
+        # Round-trip a known LogNormal(meanlog=1.0, sdlog=0.5)
+        d = LogNormal(1.0, 0.5)
+        m = mean(d); s = std(d)
+        @test convert_to_logmean(m, s) ≈ 1.0 atol = 1e-10
+        @test convert_to_logsd(m, s) ≈ 0.5 atol = 1e-10
+    end
+
+    @testset "add_breakpoints" begin
+        dates = collect(Date(2024,1,1):Day(1):Date(2024,1,5))
+        df = DataFrame(date=dates, confirm=[10, 12, 15, 18, 20])
+        # No breakpoints: column added, all zero
+        out = add_breakpoints(df)
+        @test :breakpoints in propertynames(out)
+        @test all(out.breakpoints .== 0)
+        # Marked breakpoint
+        out2 = add_breakpoints(df; dates=[Date(2024,1,3)])
+        @test out2.breakpoints == [0, 0, 1, 0, 0]
+        # Multiple breakpoints
+        out3 = add_breakpoints(df; dates=[Date(2024,1,2), Date(2024,1,5)])
+        @test out3.breakpoints == [0, 1, 0, 0, 1]
+        # Date not in data → error
+        @test_throws ArgumentError add_breakpoints(df; dates=[Date(2030,1,1)])
+        # Missing :date column → error
+        @test_throws ArgumentError add_breakpoints(DataFrame(confirm=[1,2]))
+    end
+
+    @testset "fill_missing" begin
+        # Weekly data → daily grid. Auto-detected interval = 7 days, so
+        # the start is padded with 6 days, all marked accumulate=true.
+        # Each weekly gap contributes 6 more accumulate=true days.
+        weekly = DataFrame(
+            date = collect(Date(2024,1,1):Day(7):Date(2024,1,29)),
+            confirm = [50, 70, 65, 80, 60],
+        )
+        out = fill_missing(weekly; missing_dates = :accumulate)
+        @test nrow(out) == 29 + 6                       # initial padding
+        @test out.date[1] == Date(2023,12,26)            # 6 days before first obs
+        @test count(out.accumulate) == 6 + 4 * 6         # padding + gaps
+        @test out[out.date .== Date(2024,1,8), :confirm][1] == 70
+        @test ismissing(out[out.date .== Date(2024,1,2), :confirm][1])
+
+        # Same but with explicit initial_accumulate=1 (no leading pad)
+        out_no_pad = fill_missing(weekly; missing_dates = :accumulate,
+                                   initial_accumulate = 1)
+        @test nrow(out_no_pad) == 29
+        @test out_no_pad.date[1] == Date(2024,1,1)
+        @test count(out_no_pad.accumulate) == 4 * 6      # only gaps
+
+        # missing_dates = :zero fills gap with zero (no accumulate flag for
+        # the gap rows). Initial pad still applies to give 6 leading
+        # accumulate=true rows.
+        out_zero = fill_missing(weekly; missing_dates = :zero)
+        @test count(out_zero.accumulate) == 6            # only leading pad
+        @test out_zero[out_zero.date .== Date(2024,1,2), :confirm][1] == 0
+
+        # initial_accumulate pads the start
+        daily = DataFrame(
+            date = collect(Date(2024,1,1):Day(1):Date(2024,1,5)),
+            confirm = [10, 12, 15, 18, 20],
+        )
+        padded = fill_missing(daily; initial_accumulate = 3)
+        @test nrow(padded) == 7
+        @test padded.date[1] == Date(2023,12,30)
+        # First two padded days marked accumulate
+        @test padded.accumulate[1:2] == [true, true]
+        @test padded.accumulate[3:end] == fill(false, 5)
+
+        # missing_obs = :zero on already-present rows
+        with_na = DataFrame(
+            date = collect(Date(2024,1,1):Day(1):Date(2024,1,5)),
+            confirm = Union{Int, Missing}[10, missing, 15, missing, 20],
+        )
+        out_obs = fill_missing(with_na; missing_obs = :zero)
+        @test out_obs.confirm == [10, 0, 15, 0, 20]
+
+        # Pre-existing accumulate column → error
+        bad = DataFrame(date = [Date(2024,1,1)], confirm = [10],
+                        accumulate = [false])
+        @test_throws ArgumentError fill_missing(bad)
+    end
+
+    @testset "filter_leading_zeros" begin
+        dates = collect(Date(2024,1,1):Day(1):Date(2024,1,5))
+        df = DataFrame(date=dates, confirm=[0, 0, 5, 7, 9])
+        out = filter_leading_zeros(df)
+        @test nrow(out) == 3
+        @test out.date[1] == Date(2024,1,3)
+        @test out.confirm == [5, 7, 9]
+        # All zero → empty
+        df0 = DataFrame(date=dates, confirm=zeros(Int, 5))
+        @test nrow(filter_leading_zeros(df0)) == 0
+        # First positive is row 1 → no rows dropped
+        df_clean = DataFrame(date=dates, confirm=[1, 2, 3, 4, 5])
+        @test nrow(filter_leading_zeros(df_clean)) == 5
+        # Custom obs column
+        df_custom = DataFrame(date=dates,
+                              counts=[0, 0, 0, 4, 8])
+        out_c = filter_leading_zeros(df_custom; obs_column=:counts)
+        @test nrow(out_c) == 2
     end
 end

@@ -73,7 +73,10 @@ export get_samples, get_predictions, get_parameters, get_imputed_reports
 export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
        simulate_infections, forecast_infections, opts_list,
        estimate_dist, bootstrapped_dist_fit,
-       get_regional_results
+       get_regional_results,
+       convert_to_logmean, convert_to_logsd,
+       add_breakpoints, filter_leading_zeros, fill_missing,
+       calc_CrI, calc_CrIs, calc_summary_stats, calc_summary_measures
 
 include("distributions.jl")
 include("options.jl")
@@ -86,6 +89,7 @@ include("secondary.jl")
 include("truncation.jl")
 include("regional.jl")
 include("utilities.jl")
+include("estimate_dist.jl")
 include("r_bridge.jl")
 
 # Stubs for plotting functions (implemented by CairoMakie extension)

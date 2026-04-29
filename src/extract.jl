@@ -4,18 +4,47 @@
 # back to dated DataFrames with credible intervals.
 
 """
+    EstimateInfectionsArgs
+
+Captures the configuration arguments passed to `estimate_infections()`.
+Mirrors the `args` field of EpiNow2 R's v1.8 `epinowfit` S3 class so
+that a fitted result can be inspected (and in principle replayed)
+without referring back to the original call.
+"""
+struct EstimateInfectionsArgs
+    generation_time::GTOpts
+    delays::DelayOpts
+    truncation::TruncOpts
+    rt::RtOpts
+    backcalc::BackcalcOpts
+    gp::GPOpts
+    obs::ObsOpts
+    forecast::ForecastOpts
+    inference::InferenceOpts
+    CrIs::Vector{Float64}
+end
+
+"""
     EstimateInfectionsResult
 
-Result of `estimate_infections()`.
+Result of `estimate_infections()`. Fields:
+
+- `fit`: the underlying `EpiNow2Fit` (chain + generated quantities + metadata)
+- `args`: the `EstimateInfectionsArgs` capturing the call configuration
+- `observations`: the input data as an `EpiData`
+- `infections`, `reports`, `rt`, `growth_rate`: pre-computed posterior summaries
+- `timing`: elapsed inference seconds
 """
 struct EstimateInfectionsResult
     fit::EpiNow2Fit
+    args::EstimateInfectionsArgs
     observations::EpiData
-    infections::DataFrame     # by date of infection
-    reports::DataFrame        # by date of report
-    rt::DataFrame             # reproduction number by date
-    growth_rate::DataFrame    # growth rate by date
-    timing::Float64           # seconds
+    infections::DataFrame        # by date of infection
+    reports::DataFrame           # by date of report
+    rt::DataFrame                # depletion-adjusted reproduction number
+    rt_unadjusted::DataFrame     # transmission Rt (= rt when pop=0)
+    growth_rate::DataFrame       # growth rate by date
+    timing::Float64              # seconds
 end
 
 """
@@ -100,25 +129,72 @@ get_samples(result::EpinowResult; kwargs...) =
     get_samples(result.estimates; kwargs...)
 
 """
-    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9])
+    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9],
+                    quantiles=[0.05, 0.25, 0.5, 0.75, 0.95])
 
-Extract case predictions.
+Extract case predictions in one of three formats:
+
+- `:summary` — pre-computed posterior summary (`result.reports`).
+  `CrIs` controls the credible-interval columns surfaced.
+- `:sample` — long-format posterior samples ready for
+  `scoringutils::as_forecast_sample()`. Columns: `forecast_date`, `date`,
+  `horizon`, `sample`, `predicted`.
+- `:quantile` — quantile predictions ready for
+  `scoringutils::as_forecast_quantile()`. Columns: `forecast_date`,
+  `date`, `horizon`, `quantile_level`, `predicted`. `quantiles`
+  controls the quantile levels.
 """
 function get_predictions(
     result::EstimateInfectionsResult;
     format::Symbol=:summary,
-    CrIs::Vector{Float64}=[0.2, 0.5, 0.9]
+    CrIs::Vector{Float64}=[0.2, 0.5, 0.9],
+    quantiles::Vector{Float64}=[0.05, 0.25, 0.5, 0.75, 0.95],
 )
     if format == :summary
         return result.reports
     elseif format == :sample
-        return get_samples(result; variable=:reports)
+        samples = get_samples(result; variable=:reports)
+        return _format_sample_predictions(samples, result)
     elseif format == :quantile
         samples = get_samples(result; variable=:reports)
-        return _samples_to_quantiles(samples, CrIs)
+        return _format_quantile_predictions(samples, quantiles, result)
     else
-        throw(ArgumentError("Unknown format: $format. Use :summary, :sample, or :quantile"))
+        throw(ArgumentError(
+            "Unknown format: $format. Use :summary, :sample, or :quantile"
+        ))
     end
+end
+
+function _format_sample_predictions(samples::DataFrame, result)
+    forecast_date = result.observations.date[end]
+    DataFrame(
+        forecast_date = fill(forecast_date, nrow(samples)),
+        date = samples.date,
+        horizon = Dates.value.(samples.date .- forecast_date),
+        sample = samples.sample,
+        predicted = samples.value,
+    )
+end
+
+function _format_quantile_predictions(
+    samples::DataFrame, quantiles::Vector{Float64}, result,
+)
+    forecast_date = result.observations.date[end]
+    grouped = groupby(samples, :date)
+    rows = NamedTuple[]
+    for g in grouped
+        d = g.date[1]
+        for q in quantiles
+            push!(rows, (
+                forecast_date = forecast_date,
+                date = d,
+                horizon = Dates.value(d - forecast_date),
+                quantile_level = q,
+                predicted = quantile(g.value, q),
+            ))
+        end
+    end
+    DataFrame(rows)
 end
 
 """
@@ -163,7 +239,8 @@ end
 # ── Internal: build result from generated quantities ─────────────────────
 
 function build_result(
-    fit::EpiNow2Fit, data::EpiData, elapsed::Float64;
+    fit::EpiNow2Fit, data::EpiData, args::EstimateInfectionsArgs,
+    elapsed::Float64;
     CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
 )
     dates = _output_dates(fit.metadata)
@@ -171,12 +248,14 @@ function build_result(
     infections = _summarise_gq(fit, :infections, dates, CrIs)
     reports = _summarise_gq(fit, :reports, dates, CrIs)
     rt_df = _summarise_gq(fit, :R, dates, CrIs)
+    rt_unadjusted = _summarise_gq(fit, :R_unadjusted, dates, CrIs)
 
     # Growth rate: log-diff of infections
     growth = _compute_growth_rate(fit, dates, CrIs)
 
     EstimateInfectionsResult(
-        fit, data, infections, reports, rt_df, growth, elapsed
+        fit, args, data,
+        infections, reports, rt_df, rt_unadjusted, growth, elapsed,
     )
 end
 

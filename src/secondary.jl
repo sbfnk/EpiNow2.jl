@@ -6,12 +6,28 @@ struct SecondaryMetadata
 end
 
 """
+    EstimateSecondaryArgs
+
+Captures the configuration arguments passed to `estimate_secondary()`.
+Mirrors the `args` field of EpiNow2 R's v1.8 `epinowfit` S3 class.
+"""
+struct EstimateSecondaryArgs
+    secondary::SecondaryOpts
+    delays::DelayOpts
+    obs::ObsOpts
+    inference::InferenceOpts
+    burn_in::Int
+    CrIs::Vector{Float64}
+end
+
+"""
     EstimateSecondaryResult
 
 Result of `estimate_secondary()`.
 """
 struct EstimateSecondaryResult
     fit::EpiNow2Fit
+    args::EstimateSecondaryArgs
     observations::SecondaryData
     predictions::DataFrame
     timing::Float64
@@ -81,7 +97,10 @@ function estimate_secondary(
 
     predictions = _summarise_secondary_gq(fit, sec_data.date, CrIs)
 
-    EstimateSecondaryResult(fit, sec_data, predictions, elapsed)
+    args = EstimateSecondaryArgs(
+        secondary, delays, obs, inference, burn_in, CrIs
+    )
+    EstimateSecondaryResult(fit, args, sec_data, predictions, elapsed)
 end
 
 """
