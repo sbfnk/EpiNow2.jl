@@ -36,7 +36,7 @@ reason.
 | `estimate_infections()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateInfectionsArgs`). v1.8 adjusted-vs-unadjusted Rt outputs split (`result.rt` is depletion-adjusted; `result.rt_unadjusted` is the transmission Rt). |
 | `estimate_secondary()`    | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateSecondaryArgs`). |
 | `estimate_truncation()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateTruncationArgs`). |
-| `estimate_dist()`         | ⚠️ partial     | 8454b076   | `.jl` has `estimate_dist()` (utilities.jl) using maximum-likelihood fits. R's new `estimate_dist()` (post-1.8) uses Stan/MCMC with proper double censoring via `primarycensored`. Not yet mirrored. |
+| `estimate_dist()`         | ✅ matched     | 8454b076   | Censored MCMC fit via `CensoredDistributions.double_interval_censored` + Turing/NUTS. Currently lognormal/gamma + uniform primary; gamma/normal/exp/weibull and `expgrowth` primary deferred. |
 | `regional_epinow()`       | ✅ matched     | 8454b076   | |
 | `forecast_infections()`   | ✅ matched     | 8454b076   | |
 | `forecast_secondary()`    | ✅ matched     | 8454b076   | |
