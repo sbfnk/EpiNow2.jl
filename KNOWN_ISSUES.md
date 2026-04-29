@@ -34,37 +34,59 @@ seed=42):**
 - The `median` posterior trajectory remains stable, masking the
   pathology in summary tables but not in the full posterior.
 
-**Hypotheses (ranked by plausibility):**
+**Investigation (2026-04-29):**
 
-1. **GP prior under-identification in this regime**. Default
-   `alpha = HalfNormal(0.01)` is very tight and the data don't
-   pull alpha far from prior mean for the median sample, but
-   the posterior still has a heavy right tail where alpha can
-   reach ~1.0 and produce divergent Rt trajectories. Sampler
-   visits these regions, contributing to the mean explosion.
-2. **Likelihood scaling differs from Stan**. Julia uses
-   `Turing.@addlogprob! _negbin2_logpmf(...)` per observation;
-   Stan uses `target += neg_binomial_2_lpmf`. Worth checking if
-   either side double-applies an `obs_weight` factor or has a
-   sign issue.
-3. **`update_Rt` indexing bug**. The .jl `gp_cumsum` construction
-   matches Stan's `update_Rt` structurally (verified 2026-04-29),
-   so this is unlikely but not ruled out. Worth a unit test that
-   feeds known `(R0, alpha, rho, eta)` into both implementations
-   and compares Rt point-by-point.
+Three hypotheses were tested.
 
-**Reproducer:** `test/validate_against_r.jl` — already wired to use
-the existing CSV reference data in `test/reference/`.
+| Hypothesis                                    | Verdict |
+|-----------------------------------------------|---------|
+| (1) Likelihood scaling bug vs Stan            | NOT confirmed |
+| (2) Sampler hitting divergences               | CONFIRMED |
+| (3) `alpha = HalfNormal(0.01)` prior too tight | FALSE |
 
-**Suggested next steps:**
+Details:
 
-1. Stan-vs-Julia direct logp check at fixed parameters: build a Turing
-   `LogDensityProblem` from the model and call `logdensity(model, θ)`,
-   then compare to Stan's logp at the same θ via `expose_stan_fns()` or
-   manual reproduction of the Stan model in cmdstan.
-2. Inspect divergences / treedepth in the .jl chain. If many divergences
-   are firing, the heavy alpha tail is a sampler problem; if few, it's
-   a posterior shape problem.
-3. Try a stronger alpha prior (e.g. `HalfNormal(0.05)`) and re-validate;
-   if R's behaviour reproduces, the default prior is too tight in the
-   short-time-series regime.
+1. **Likelihood scaling.** Per-sample manual reproduction of
+   `sum(_negbin2_logpmf(cases[t], expected_reports[t], 1/rod^2))`
+   matches `chain[:loglikelihood]` within ~10 logL units for
+   typical samples. Larger gaps appear only at extreme tail
+   samples (e.g. R0=1.68, alpha=0.91) and are consistent with
+   floating-point precision in regimes where the negbin pmf is
+   essentially zero. So the likelihood is being computed correctly.
+
+2. **Sampler divergences.** `chain[:numerical_error]` is `1.0` for
+   ~4% of post-warmup samples at the default prior, rising to ~25%
+   when the alpha prior is widened. `step_size` adapts down to
+   ~0.03 (small), and `tree_depth` hits the cap of 12 in ~2% of
+   samples. NUTS is genuinely struggling with the posterior
+   geometry — the heavy right tail in `gp_alpha` is partly
+   artefactual from divergent transitions wandering into stiff
+   regions.
+
+3. **Wider alpha prior doesn't recover R's behaviour.** Tested
+   `Normal(0, σ)` with σ ∈ {0.01, 0.05, 0.10, 0.30}. In all four
+   cases the posterior median Rt remains essentially flat
+   (Rt[1] ≈ Rt[30]), and `gp_alpha` p99 remains very large
+   (1.5–5.0 across all priors). Widening just adds more divergences
+   without improving the trajectory.
+
+**Verdict:** the bug is in the **posterior geometry / sampler**
+interaction, not in the likelihood, the GP construction, or the
+prior width. The most likely remaining culprits are:
+
+- AdvancedHMC's mass-matrix adaptation. Stan's adaptor uses a
+  windowed dual-averaging scheme; Turing's default
+  `StanHMCAdaptor` should be similar, but in practice the chains
+  are getting stuck. Worth trying:
+  - longer warmup (R uses 1000; we tested 500–1000)
+  - dense mass matrix instead of diagonal
+  - JITTER initialisation across chains
+- Subtle parameterisation difference in `log_R = log(R0) + cumsum(GP)`.
+  R's Stan stores `eta` as the standard-normal noise and reconstructs
+  GP every iteration; .jl does the same via `gp_z ~ filldist(Normal,…)`.
+  Verified structurally identical, but a unit test feeding known
+  `(R0, alpha, rho, eta)` to both implementations and comparing
+  trajectories point-by-point would close this off definitively.
+
+**Reproducer:** `test/validate_against_r.jl`, with reference CSVs in
+`test/reference/`.
