@@ -36,7 +36,7 @@ reason.
 | `estimate_infections()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateInfectionsArgs`). v1.8 adjusted-vs-unadjusted Rt outputs split (`result.rt` is depletion-adjusted; `result.rt_unadjusted` is the transmission Rt). |
 | `estimate_secondary()`    | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateSecondaryArgs`). |
 | `estimate_truncation()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateTruncationArgs`). |
-| `estimate_dist()`         | ✅ matched     | 8454b076   | Censored MCMC fit via `CensoredDistributions.double_interval_censored` + Turing/NUTS. Currently lognormal/gamma + uniform primary; gamma/normal/exp/weibull and `expgrowth` primary deferred. |
+| `estimate_dist()`         | ✅ matched     | 8454b076   | Censored MCMC fit via `CensoredDistributions.double_interval_censored` + Turing/NUTS. Lognormal/gamma/normal/exp/weibull families; uniform and expgrowth primary windows. |
 | `regional_epinow()`       | ✅ matched     | 8454b076   | |
 | `forecast_infections()`   | ✅ matched     | 8454b076   | |
 | `forecast_secondary()`    | ✅ matched     | 8454b076   | |
@@ -100,7 +100,7 @@ reason.
 | `get_distribution()`, `get_pmf()` | ❌ missing | 8454b076   | Tied to `dist_spec` algebra (see above). |
 | `extract_samples()`, `extract_CrIs()`, `extract_inits()`, `extract_stan_param()` | N/A | — | Stan-output-shape utilities; `.jl` returns chains/DataFrames directly. |
 | `summary()` S3 methods    | ⚠️ partial      | 8454b076   | v1.8 `epinowfit` S3 class with `$fit`/`$args`/`$observations` not mirrored. |
-| `calc_CrI()`, `calc_CrIs()`, `calc_summary_measures()`, `calc_summary_stats()` | ❌ missing | 8454b076 | Summary helpers — `.jl` defers to `MCMCChains` / DataFrames. |
+| `calc_CrI()`, `calc_CrIs()`, `calc_summary_measures()`, `calc_summary_stats()` | ✅ matched | 8454b076 | Long-format DataFrame helpers compatible with `get_samples()` output. |
 | `make_conf()`             | N/A             | —          | R-output-formatting helper. |
 
 ## Plotting
