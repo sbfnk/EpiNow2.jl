@@ -740,7 +740,11 @@ end
                 reporting_prob = 1.0
             end
             expected = final[t] * reporting_prob
-            Turing.@addlogprob! logpdf(Poisson(max(expected, 1e-6)), snap[t])
+            # `max(expected, 1e-6)` doesn't guard against NaN — a NaN
+            # in `final[t]` from upstream (e.g. ForwardDiff Dual init)
+            # would propagate into Poisson and trip its domain check.
+            safe_lambda = isnan(expected) || expected < 1e-6 ? 1e-6 : expected
+            Turing.@addlogprob! logpdf(Poisson(safe_lambda), snap[t])
         end
     end
 

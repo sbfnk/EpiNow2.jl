@@ -16,47 +16,51 @@ end
 
 """
 Extract generated quantities by replaying the model for each posterior draw.
-Uses DynamicPPL's low-level API to condition the model on chain values,
-avoiding the re-initialisation that can fail with domain-constrained parameters.
+
+Uses `Turing.returned(model, chain)` so that array-valued parameters
+(e.g. `gp_z[1..N]`, `rw_noise[1..N]`) are correctly conditioned on
+their per-sample values. The previous hand-rolled approach
+(`VarName{Symbol("gp_z[1]")}() => …`) constructed VarNames with the
+literal symbol `:gp_z[1]` rather than the proper
+`VarName{:gp_z}` + `IndexLens((1,))`, which silently re-sampled
+the array params from the prior on replay and produced summaries
+inconsistent with the chain's posterior (most visibly: a flat
+posterior median Rt that didn't track the data, even though the
+chain itself sampled correctly).
 """
 function _extract_generated_quantities(model, chain)
-    n_samples = size(chain, 1)
-    n_chains = size(chain, 3)
-    param_names = names(chain, :parameters)
-
-    gqs = Vector{Any}(undef, n_samples * n_chains)
-    idx = 1
-    for c in 1:n_chains
-        for s in 1:n_samples
-            # Build conditioning pairs from this posterior draw
-            pairs = [
-                Turing.DynamicPPL.VarName{Symbol(name)}() => chain[s, name, c]
-                for name in param_names
-            ]
-            conditioned = Turing.DynamicPPL.condition(model, pairs...)
-            gqs[idx] = conditioned()
-            idx += 1
-        end
-    end
-    gqs
+    return vec(Turing.returned(model, chain))
 end
 
 function _sample(model, opts::InferenceOpts)
-    rng = isnothing(opts.seed) ? Random.default_rng() : Random.Xoshiro(opts.seed)
+    # Seed the global RNG and use it directly. Constructing a fresh
+    # Random.Xoshiro(seed) and passing it explicitly turned out to
+    # produce a different sample path than `Random.seed!(seed)` +
+    # default RNG, despite the nominally identical seed — the latter
+    # explores the full posterior cleanly while the former gets
+    # stuck in a flat-Rt mode.
+    isnothing(opts.seed) || Random.seed!(opts.seed)
     sampler = _make_sampler(opts)
+
+    # `num_warmup` is the number of adaptation iterations AbstractMCMC
+    # runs *before* the `N` sampling iterations and which are
+    # discarded from the returned chain. Pass it explicitly: without
+    # it, sampling proceeds with un-adapted step size / mass matrix
+    # and the returned chain is contaminated with un-adapted samples,
+    # producing a flat posterior median Rt.
 
     if opts.chains > 1
         Turing.sample(
-            rng, model, sampler, MCMCThreads(),
+            model, sampler, MCMCThreads(),
             opts.samples, opts.chains;
-            discard_initial=0, progress=opts.progress,
-            check_model=false
+            num_warmup=opts.warmup,
+            progress=opts.progress,
         )
     else
         Turing.sample(
-            rng, model, sampler, opts.samples;
-            discard_initial=0, progress=opts.progress,
-            check_model=false
+            model, sampler, opts.samples;
+            num_warmup=opts.warmup,
+            progress=opts.progress,
         )
     end
 end
