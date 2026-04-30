@@ -13,6 +13,7 @@ using EpiNow2: _dist_family, _convolve_pmfs,
 # ── Comma-formatted tick labels ──────────────────────────────────────────
 
 function _comma_format(x::Real)
+    (!isfinite(x) || abs(x) > 1e15) && return string(x)
     n = round(Int, x)
     s = string(abs(n))
     parts = String[]
