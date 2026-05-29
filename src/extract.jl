@@ -132,6 +132,33 @@ get_samples(result::EpinowResult; kwargs...) =
     get_samples(result.estimates; kwargs...)
 
 """
+Long-format posterior-predictive draws of reported cases (latent expectation
+plus observation noise), with columns `date`, `variable`, `sample`, `value`.
+Used for forecast export so scored predictions reflect observation noise.
+"""
+function _imputed_report_samples(result::EstimateInfectionsResult)
+    fit = result.fit
+    mat, used_dates = _gq_matrix(fit, :reports, _output_dates(fit.metadata))
+    isnothing(mat) && return DataFrame(
+        date=Date[], variable=Symbol[], sample=Int[], value=Float64[]
+    )
+    family = result.args.obs.family
+    phi = family == negbin ? _chain_vector(fit, :reporting_overdispersion) : nothing
+    pp = _draw_obs_predictive(mat, family, phi)
+    n_dates, n_samples = size(pp)
+    rows = NamedTuple{(:date, :variable, :sample, :value),
+                      Tuple{Date, Symbol, Int, Float64}}[]
+    for i in 1:n_samples
+        for t in 1:n_dates
+            push!(rows, (
+                date=used_dates[t], variable=:reports, sample=i, value=pp[t, i]
+            ))
+        end
+    end
+    DataFrame(rows)
+end
+
+"""
     get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9],
                     quantiles=[0.05, 0.25, 0.5, 0.75, 0.95])
 
@@ -156,10 +183,10 @@ function get_predictions(
     if format == :summary
         return result.reports
     elseif format == :sample
-        samples = get_samples(result; variable=:reports)
+        samples = _imputed_report_samples(result)
         return _format_sample_predictions(samples, result)
     elseif format == :quantile
-        samples = get_samples(result; variable=:reports)
+        samples = _imputed_report_samples(result)
         return _format_quantile_predictions(samples, quantiles, result)
     else
         throw(ArgumentError(
