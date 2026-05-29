@@ -32,7 +32,9 @@ Result of `estimate_infections()`. Fields:
 - `fit`: the underlying `EpiNow2Fit` (chain + generated quantities + metadata)
 - `args`: the `EstimateInfectionsArgs` capturing the call configuration
 - `observations`: the input data as an `EpiData`
-- `infections`, `reports`, `rt`, `growth_rate`: pre-computed posterior summaries
+- `infections`, `reports`, `rt`, `growth_rate`: pre-computed posterior summaries.
+  `reports` is the posterior predictive (includes observation noise); the latent
+  expectation is in `reports_expected`.
 - `timing`: elapsed inference seconds
 """
 struct EstimateInfectionsResult
@@ -40,7 +42,8 @@ struct EstimateInfectionsResult
     args::EstimateInfectionsArgs
     observations::EpiData
     infections::DataFrame        # by date of infection
-    reports::DataFrame           # by date of report
+    reports::DataFrame           # posterior predictive reported cases (incl. obs noise)
+    reports_expected::DataFrame  # latent expected reports (no obs noise)
     rt::DataFrame                # depletion-adjusted reproduction number
     rt_unadjusted::DataFrame     # transmission Rt (= rt when pop=0)
     growth_rate::DataFrame       # growth rate by date
@@ -246,7 +249,12 @@ function build_result(
     dates = _output_dates(fit.metadata)
 
     infections = _summarise_gq(fit, :infections, dates, CrIs)
-    reports = _summarise_gq(fit, :reports, dates, CrIs)
+    # `reports` is the posterior predictive (latent expectation + observation
+    # noise), matching R's `reported_cases`. The latent mean is kept separately.
+    reports_expected = _summarise_gq(fit, :reports, dates, CrIs)
+    reports = _summarise_gq_predictive(
+        fit, :reports, dates, CrIs, args.obs.family, :reporting_overdispersion
+    )
     rt_df = _summarise_gq(fit, :R, dates, CrIs)
     rt_unadjusted = _summarise_gq(fit, :R_unadjusted, dates, CrIs)
 
@@ -255,7 +263,8 @@ function build_result(
 
     EstimateInfectionsResult(
         fit, args, data,
-        infections, reports, rt_df, rt_unadjusted, growth, elapsed,
+        infections, reports, reports_expected, rt_df, rt_unadjusted,
+        growth, elapsed,
     )
 end
 
@@ -274,16 +283,24 @@ function _summarise_gq(
     fit::EpiNow2Fit, field::Symbol,
     dates::Vector{Date}, CrIs::Vector{Float64}
 )
+    mat, used_dates = _gq_matrix(fit, field, dates)
+    isnothing(mat) && return DataFrame()
+    _matrix_to_summary(mat, used_dates, CrIs)
+end
+
+"""
+Collect a generated-quantities field into an `(n_dates × n_samples)` matrix.
+Returns `(nothing, dates)` when the field is absent (model variant).
+"""
+function _gq_matrix(fit::EpiNow2Fit, field::Symbol, dates::Vector{Date})
     gqs = fit.generated_quantities
     n_samples = length(gqs)
 
-    # Not all GQs may have the field (model variants)
-    haskey(first(gqs), field) || return DataFrame()
+    haskey(first(gqs), field) || return (nothing, dates)
 
     n_times = length(first(gqs)[field])
     n_dates = min(n_times, length(dates))
 
-    # Collect samples into matrix (n_dates × n_samples)
     mat = Matrix{Float64}(undef, n_dates, n_samples)
     for (i, gq) in enumerate(gqs)
         vals = gq[field]
@@ -291,8 +308,62 @@ function _summarise_gq(
             mat[t, i] = Float64(vals[t])
         end
     end
+    (mat, dates[1:n_dates])
+end
 
-    _matrix_to_summary(mat, dates[1:n_dates], CrIs)
+"""Extract a scalar chain parameter as a per-sample vector, or `nothing`."""
+function _chain_vector(fit::EpiNow2Fit, name::Symbol)
+    chain = fit.chain
+    name in names(chain) || return nothing
+    vec(Array(chain[name]))
+end
+
+"""
+    _draw_obs_predictive(expected, family, phi_samples)
+
+Draw an integer posterior-predictive matrix from a matrix of latent
+expectations by sampling the fitted observation model per posterior sample
+(NegBin for `negbin`, Poisson otherwise). `phi_samples[i]` is the
+overdispersion parameter for sample `i` (used only for NegBin). A fixed local
+RNG makes the draws reproducible for a given fit.
+"""
+function _draw_obs_predictive(
+    expected::Matrix{Float64}, family::ObsFamily,
+    phi_samples::Union{Nothing, AbstractVector}
+)
+    rng = Random.MersenneTwister(0)
+    n_dates, n_samples = size(expected)
+    out = Matrix{Float64}(undef, n_dates, n_samples)
+    use_negbin = family == negbin && !isnothing(phi_samples)
+    for i in 1:n_samples
+        for t in 1:n_dates
+            μ = max(min(expected[t, i], 1e15), 1e-6)
+            if use_negbin
+                φ = 1.0 / Float64(phi_samples[i])^2
+                out[t, i] = φ > 1e-4 ?
+                    Float64(rand(rng, NegativeBinomial2(μ, φ))) :
+                    Float64(rand(rng, Poisson(μ)))
+            else
+                out[t, i] = Float64(rand(rng, Poisson(μ)))
+            end
+        end
+    end
+    out
+end
+
+"""
+Summarise the posterior predictive of a generated-quantities field: add
+observation noise to the latent expectation before computing summary stats.
+"""
+function _summarise_gq_predictive(
+    fit::EpiNow2Fit, field::Symbol, dates::Vector{Date},
+    CrIs::Vector{Float64}, family::ObsFamily, phi_param::Symbol
+)
+    mat, used_dates = _gq_matrix(fit, field, dates)
+    isnothing(mat) && return DataFrame()
+    phi = family == negbin ? _chain_vector(fit, phi_param) : nothing
+    pp = _draw_obs_predictive(mat, family, phi)
+    _matrix_to_summary(pp, used_dates, CrIs)
 end
 
 function _matrix_to_summary(
@@ -398,7 +469,9 @@ end
     get_imputed_reports(result; CrIs=[0.2, 0.5, 0.9])
 
 Generate integer-valued imputed report draws by sampling from the fitted
-observation model (NegBin or Poisson) for each posterior sample.
+observation model (NegBin or Poisson) for each posterior sample. This is the
+posterior predictive of reported cases — the same quantity surfaced as
+`result.reports`, recomputable here at custom credible-interval levels.
 
 Returns a summary DataFrame matching the format of `result.reports`.
 """
@@ -407,37 +480,10 @@ function get_imputed_reports(
     CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
 )
     fit = result.fit
-    gqs = fit.generated_quantities
-    params = get_parameters(result)
-    dates = _output_dates(fit.metadata)
-    obs = fit.metadata.obs_opts
-    n_samples = length(gqs)
-
-    has_phi = haskey(params, :reporting_overdispersion)
-    phi_samples = has_phi ? params[:reporting_overdispersion] : nothing
-
-    n_times = length(first(gqs).reports)
-    n_dates = min(n_times, length(dates))
-    mat = Matrix{Float64}(undef, n_dates, n_samples)
-
-    for (i, gq) in enumerate(gqs)
-        reports = gq.reports
-        for t in 1:n_dates
-            μ = max(Float64(reports[t]), 1e-6)
-            if has_phi
-                φ = 1.0 / Float64(phi_samples[i])^2
-                # Safe NegBin sampling: fall back to Poisson for extreme φ,
-                # and clamp μ to avoid overflow in integer conversion
-                μ_safe = min(μ, 1e15)
-                mat[t, i] = φ > 1e-4 ? Float64(rand(NegativeBinomial2(μ_safe, φ))) :
-                                        Float64(rand(Poisson(μ_safe)))
-            else
-                mat[t, i] = Float64(rand(Poisson(μ)))
-            end
-        end
-    end
-
-    _matrix_to_summary(mat, dates[1:n_dates], CrIs)
+    _summarise_gq_predictive(
+        fit, :reports, _output_dates(fit.metadata), CrIs,
+        result.args.obs.family, :reporting_overdispersion
+    )
 end
 
 get_imputed_reports(result::EpinowResult; kwargs...) =

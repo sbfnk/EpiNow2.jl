@@ -29,7 +29,8 @@ struct EstimateSecondaryResult
     fit::EpiNow2Fit
     args::EstimateSecondaryArgs
     observations::SecondaryData
-    predictions::DataFrame
+    predictions::DataFrame          # posterior predictive (incl. obs noise)
+    predictions_expected::DataFrame # latent expected secondary (no obs noise)
     timing::Float64
 end
 
@@ -95,12 +96,19 @@ function estimate_secondary(
 
     verbose && @info "Secondary estimation complete" seconds=round(elapsed, digits=1)
 
-    predictions = _summarise_secondary_gq(fit, sec_data.date, CrIs)
+    # `predictions` is the posterior predictive (latent expectation + observation
+    # noise), matching R's `get_predictions()`. The latent mean is kept separately.
+    predictions_expected = _summarise_secondary_gq(fit, sec_data.date, CrIs)
+    predictions = _summarise_secondary_predictive(
+        fit, sec_data.date, CrIs, obs.family
+    )
 
     args = EstimateSecondaryArgs(
         secondary, delays, obs, inference, burn_in, CrIs
     )
-    EstimateSecondaryResult(fit, args, sec_data, predictions, elapsed)
+    EstimateSecondaryResult(
+        fit, args, sec_data, predictions, predictions_expected, elapsed
+    )
 end
 
 """
@@ -212,3 +220,16 @@ end
 
 _summarise_secondary_gq(fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}) =
     _summarise_gq(fit, :expected, dates, CrIs)
+
+_summarise_secondary_predictive(
+    fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}, family::ObsFamily
+) = _summarise_gq_predictive(fit, :expected, dates, CrIs, family, :overdispersion)
+
+"""
+    get_predictions(result::EstimateSecondaryResult)
+
+Return the posterior predictive of secondary observations (matching R's
+`get_predictions()`). For the latent expectation without observation noise,
+use `result.predictions_expected`.
+"""
+get_predictions(result::EstimateSecondaryResult) = result.predictions
