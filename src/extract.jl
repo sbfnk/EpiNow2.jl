@@ -96,18 +96,30 @@ end
 # ── Accessors ────────────────────────────────────────────────────────────
 
 """
-    get_samples(result; variable=nothing) -> DataFrame
+    get_samples(result; variable=nothing, predictive=false) -> DataFrame
 
-Extract raw posterior samples as a long-format DataFrame.
+Extract posterior samples as a long-format DataFrame.
 
 Columns: `date`, `variable`, `sample`, `value`
+
+By default the values are the latent generated quantities. With
+`predictive=true`, `:reports` samples are drawn through the fitted observation
+model (NegBin/Poisson), giving the posterior predictive of reported cases;
+other variables are returned unchanged.
 """
-function get_samples(result::EstimateInfectionsResult; variable=nothing)
+function get_samples(
+    result::EstimateInfectionsResult; variable=nothing, predictive=false
+)
     fit = result.fit
     meta = fit.metadata
     gqs = fit.generated_quantities
 
     dates = _output_dates(meta)
+    family = result.args.obs.family
+    phi = predictive && family == negbin ?
+        _chain_vector(fit, :reporting_overdispersion) : nothing
+    rng = predictive ? Random.MersenneTwister(0) : nothing
+
     rows = NamedTuple{(:date, :variable, :sample, :value),
                       Tuple{Date, Symbol, Int, Float64}}[]
 
@@ -115,11 +127,14 @@ function get_samples(result::EstimateInfectionsResult; variable=nothing)
         for (var, values) in pairs(gq)
             var_sym = Symbol(var)
             (!isnothing(variable) && var_sym != variable) && continue
+            add_noise = predictive && var_sym == :reports
             for (t, v) in enumerate(values)
                 t > length(dates) && continue
+                val = add_noise ?
+                    _draw_obs(rng, v, family, isnothing(phi) ? nothing : phi[i]) :
+                    Float64(v)
                 push!(rows, (
-                    date=dates[t], variable=var_sym,
-                    sample=i, value=Float64(v)
+                    date=dates[t], variable=var_sym, sample=i, value=val
                 ))
             end
         end
@@ -130,33 +145,6 @@ end
 
 get_samples(result::EpinowResult; kwargs...) =
     get_samples(result.estimates; kwargs...)
-
-"""
-Long-format posterior-predictive draws of reported cases (latent expectation
-plus observation noise), with columns `date`, `variable`, `sample`, `value`.
-Used for forecast export so scored predictions reflect observation noise.
-"""
-function _imputed_report_samples(result::EstimateInfectionsResult)
-    fit = result.fit
-    mat, used_dates = _gq_matrix(fit, :reports, _output_dates(fit.metadata))
-    isnothing(mat) && return DataFrame(
-        date=Date[], variable=Symbol[], sample=Int[], value=Float64[]
-    )
-    family = result.args.obs.family
-    phi = family == negbin ? _chain_vector(fit, :reporting_overdispersion) : nothing
-    pp = _draw_obs_predictive(mat, family, phi)
-    n_dates, n_samples = size(pp)
-    rows = NamedTuple{(:date, :variable, :sample, :value),
-                      Tuple{Date, Symbol, Int, Float64}}[]
-    for i in 1:n_samples
-        for t in 1:n_dates
-            push!(rows, (
-                date=used_dates[t], variable=:reports, sample=i, value=pp[t, i]
-            ))
-        end
-    end
-    DataFrame(rows)
-end
 
 """
     get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9],
@@ -183,10 +171,10 @@ function get_predictions(
     if format == :summary
         return result.reports
     elseif format == :sample
-        samples = _imputed_report_samples(result)
+        samples = get_samples(result; variable=:reports, predictive=true)
         return _format_sample_predictions(samples, result)
     elseif format == :quantile
-        samples = _imputed_report_samples(result)
+        samples = get_samples(result; variable=:reports, predictive=true)
         return _format_quantile_predictions(samples, quantiles, result)
     else
         throw(ArgumentError(
@@ -346,13 +334,29 @@ function _chain_vector(fit::EpiNow2Fit, name::Symbol)
 end
 
 """
+Draw one integer observation from the fitted observation model: NegBin when
+`family == negbin` and an overdispersion is given, Poisson otherwise. `μ` is
+clamped to a safe positive range, and extreme overdispersion falls back to
+Poisson to avoid degenerate NegBin draws.
+"""
+function _draw_obs(
+    rng, μ::Real, family::ObsFamily, overdisp::Union{Nothing, Real}
+)
+    μ = max(min(Float64(μ), 1e15), 1e-6)
+    if family == negbin && !isnothing(overdisp)
+        φ = 1.0 / Float64(overdisp)^2
+        φ > 1e-4 && return Float64(rand(rng, NegativeBinomial2(μ, φ)))
+    end
+    Float64(rand(rng, Poisson(μ)))
+end
+
+"""
     _draw_obs_predictive(expected, family, phi_samples)
 
 Draw an integer posterior-predictive matrix from a matrix of latent
-expectations by sampling the fitted observation model per posterior sample
-(NegBin for `negbin`, Poisson otherwise). `phi_samples[i]` is the
-overdispersion parameter for sample `i` (used only for NegBin). A fixed local
-RNG makes the draws reproducible for a given fit.
+expectations by sampling the fitted observation model per posterior sample.
+`phi_samples[i]` is the overdispersion for sample `i` (NegBin only). A fixed
+local RNG makes the draws reproducible for a given fit.
 """
 function _draw_obs_predictive(
     expected::Matrix{Float64}, family::ObsFamily,
@@ -361,18 +365,10 @@ function _draw_obs_predictive(
     rng = Random.MersenneTwister(0)
     n_dates, n_samples = size(expected)
     out = Matrix{Float64}(undef, n_dates, n_samples)
-    use_negbin = family == negbin && !isnothing(phi_samples)
     for i in 1:n_samples
+        overdisp = isnothing(phi_samples) ? nothing : phi_samples[i]
         for t in 1:n_dates
-            μ = max(min(expected[t, i], 1e15), 1e-6)
-            if use_negbin
-                φ = 1.0 / Float64(phi_samples[i])^2
-                out[t, i] = φ > 1e-4 ?
-                    Float64(rand(rng, NegativeBinomial2(μ, φ))) :
-                    Float64(rand(rng, Poisson(μ)))
-            else
-                out[t, i] = Float64(rand(rng, Poisson(μ)))
-            end
+            out[t, i] = _draw_obs(rng, expected[t, i], family, overdisp)
         end
     end
     out
