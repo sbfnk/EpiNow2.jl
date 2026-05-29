@@ -91,4 +91,40 @@ res4 <- estimate_infections(
 )
 save_results(res4, "test4")
 
+# ── Secondary model: primary → secondary (e.g. cases → deaths) ───────
+# Simulate a secondary series (30% of cases, lognormal delay) so that R
+# and Julia fit the *same* primary + secondary data. The simulated data
+# is saved alongside the R fit so Julia reads identical observations.
+cat("Running secondary test: estimate_secondary...\n")
+set.seed(42)
+sec_cases <- as.data.table(example_confirmed)[1:60]
+sec_primary <- data.table(date = sec_cases$date, primary = sec_cases$confirm)
+sec_delay <- delay_opts(LogNormal(meanlog = 1.6, sdlog = 0.5, max = 14))
+
+sim_sec <- simulate_secondary(
+  sec_primary,
+  delays = sec_delay,
+  obs = obs_opts(family = "poisson", scale = Fixed(0.3), week_effect = FALSE)
+)
+sec_input <- data.table(
+  date = sec_primary$date,
+  primary = sec_primary$primary,
+  secondary = sim_sec$secondary
+)
+write.csv(sec_input, file.path(outdir, "secondary_input.csv"), row.names = FALSE)
+
+sec_fit <- estimate_secondary(
+  sec_input,
+  secondary = secondary_opts(type = "incidence"),
+  delays = sec_delay,
+  obs = obs_opts(family = "poisson", week_effect = FALSE, scale = Normal(0.3, 0.1)),
+  burn_in = 14,
+  stan = stan_opts(samples = 1000, warmup = 500, chains = 2, seed = 42),
+  verbose = FALSE
+)
+write.csv(
+  get_predictions(sec_fit),
+  file.path(outdir, "secondary_predictions.csv"), row.names = FALSE
+)
+
 cat("Done! Reference results saved to", outdir, "\n")

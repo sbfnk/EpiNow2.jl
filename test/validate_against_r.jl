@@ -144,6 +144,24 @@ function run_julia_test4(data)
     )
 end
 
+function run_julia_secondary(data)
+    estimate_secondary(
+        data;
+        secondary = secondary_opts(),  # incidence (default), matches R
+        delays = delay_opts(discretise(LogNormal(1.6, 0.5); max=14)),
+        obs = obs_opts(
+            family = poisson,
+            week_effect = false,
+            scale = truncated(Normal(0.3, 0.1); lower=0.0)
+        ),
+        inference = inference_opts(
+            samples=1000, warmup=500, chains=1, seed=42, progress=false
+        ),
+        burn_in=14,
+        verbose=false
+    )
+end
+
 # ── Main validation ──────────────────────────────────────────────────────
 
 function run_validation()
@@ -202,6 +220,56 @@ function run_validation()
                 # Infections: median relative error should be reasonable
                 @test inf_comp.median_rel_error < 0.5
             end
+        end
+
+        # ── estimate_secondary ───────────────────────────────────────────
+        sec_input_path = joinpath(REFDIR, "secondary_input.csv")
+        sec_pred_path = joinpath(REFDIR, "secondary_predictions.csv")
+        if isfile(sec_input_path) && isfile(sec_pred_path)
+            println("\n", "="^70)
+            println("Validation: estimate_secondary (cases → secondary)")
+            println("="^70)
+
+            sec_data = CSV.read(sec_input_path, DataFrame)
+            sec_data.date = Date.(sec_data.date)
+            r_pred = CSV.read(sec_pred_path, DataFrame)
+            r_pred.date = Date.(r_pred.date)
+
+            println("Running Julia estimate_secondary...")
+            sec_result = run_julia_secondary(sec_data)
+
+            # R predictions cover only the post-burn-in period; align by date
+            r_dates = Set(r_pred.date)
+            jl_pred = filter(row -> row.date in r_dates, sec_result.predictions)
+            sort!(jl_pred, :date)
+            sort!(r_pred, :date)
+
+            sec_comp = compare_summaries(jl_pred, r_pred, "secondary")
+            # Both sides are posterior predictive (R's get_predictions and Julia's
+            # predictions include observation noise), so credible-interval widths
+            # are directly comparable too.
+            n = min(nrow(jl_pred), nrow(r_pred))
+            jl_w = mean(jl_pred.upper_90[1:n] .- jl_pred.lower_90[1:n])
+            r_w = mean(r_pred.upper_90[1:n] .- r_pred.lower_90[1:n])
+            ci_width_ratio = jl_w / r_w
+            println("\nSecondary (posterior predictive) comparison:")
+            println("  Correlation:        $(round(sec_comp.correlation, digits=3))")
+            println("  Median rel. error:  $(round(sec_comp.median_rel_error, digits=3))")
+            println("  Max rel. error:     $(round(sec_comp.max_rel_error, digits=3))")
+            println("  90% CI width ratio: $(round(ci_width_ratio, digits=3)) (Jl/R)")
+
+            @testset "estimate_secondary" begin
+                # The expected secondary series tracks scaled+delayed primary,
+                # so correlation with R should be very high.
+                @test sec_comp.correlation > 0.95
+                # Central estimate should match R within a modest tolerance.
+                @test sec_comp.median_rel_error < 0.3
+                # Posterior-predictive uncertainty should match R: CI widths
+                # within 25% of R's (both include observation noise).
+                @test 0.75 < ci_width_ratio < 1.25
+            end
+        else
+            @warn "Skipping estimate_secondary: reference files not found"
         end
     end
 end
