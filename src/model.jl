@@ -709,42 +709,62 @@ end
 
 # ── Truncation estimation model ──────────────────────────────────────────
 
+"""
+    _truncate_obs(reports, rev_cmf, reconstruct) -> Vector
+
+Apply (or, when `reconstruct`, reverse) right-truncation to the final
+`length(rev_cmf)` entries of `reports`, mirroring EpiNow2's Stan
+`truncate_obs`. `rev_cmf` is the reversed cumulative truncation mass, so the
+most recent entry is scaled by the smallest reporting fraction.
+"""
+function _truncate_obs(reports, rev_cmf, reconstruct::Bool)
+    t = length(reports)
+    trunc_max = length(rev_cmf)
+    joint_max = min(t, trunc_max)
+    first_t = t - joint_max + 1
+    first_trunc = trunc_max - joint_max + 1
+    [
+        k < first_t ? reports[k] :
+        (reconstruct ? reports[k] / rev_cmf[first_trunc + k - first_t] :
+                       reports[k] * rev_cmf[first_trunc + k - first_t])
+        for k in 1:t
+    ]
+end
+
 @model function truncation_model(
-    snapshots::Vector{Vector{Int}},
-    snapshot_lengths::Vector{Int},
+    obs::Matrix{Float64},
+    obs_dist::Vector{Int},
     max_trunc::Int,
     meanlog_prior::Distribution,
     sdlog_prior::Distribution
 )
-    trunc_meanlog ~ meanlog_prior
-    # Sample on log scale so sdlog is always positive
-    log_trunc_sdlog ~ Normal(log(mean(sdlog_prior)), std(sdlog_prior) / mean(sdlog_prior))
-    trunc_sdlog = exp(log_trunc_sdlog)
+    n_times, obs_sets = size(obs)
 
+    trunc_meanlog ~ meanlog_prior
+    trunc_sdlog ~ sdlog_prior
+    reporting_overdispersion ~ truncated(Normal(0.0, 1.0); lower=0.0)
+    φ = 1.0 / sqrt(reporting_overdispersion)
+    sigma ~ truncated(Normal(0.0, 1.0); lower=0.0)
+
+    # Discretise via double interval censoring — the same method used for
+    # delays, generation time and secondary observations across the package.
     d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
     cd = CensoredDistributions.double_interval_censored(d; interval=1, upper=max_trunc + 1)
     trunc_pmf = [exp(logpdf(cd, k)) for k in 0:max_trunc]
     trunc_pmf = trunc_pmf ./ sum(trunc_pmf)
-    trunc_cdf = cumsum(trunc_pmf)
+    trunc_rev_cmf = reverse(cumsum(trunc_pmf))
 
-    final = last(snapshots)
-    n_final = length(final)
+    # Reconstruct the most complete (last) snapshot without truncation, then
+    # re-apply truncation to map it back onto each earlier snapshot.
+    last_obs = _truncate_obs(obs[:, obs_sets], trunc_rev_cmf, true)
 
-    for (i, snap) in enumerate(snapshots[1:end-1])
-        n = snapshot_lengths[i]
-        for t in 1:min(n, n_final)
-            days_truncated = n - t
-            if days_truncated < max_trunc
-                reporting_prob = trunc_cdf[days_truncated + 1]
-            else
-                reporting_prob = 1.0
-            end
-            expected = final[t] * reporting_prob
-            # `max(expected, 1e-6)` doesn't guard against NaN — a NaN
-            # in `final[t]` from upstream (e.g. ForwardDiff Dual init)
-            # would propagate into Poisson and trip its domain check.
-            safe_lambda = isnan(expected) || expected < 1e-6 ? 1e-6 : expected
-            Turing.@addlogprob! logpdf(Poisson(safe_lambda), snap[t])
+    for i in 1:(obs_sets - 1)
+        end_t = n_times - obs_dist[i]
+        start_t = max(1, end_t - max_trunc)
+        expected = _truncate_obs(last_obs[start_t:end_t], trunc_rev_cmf, false) .+ sigma
+        for (j, idx) in enumerate(start_t:end_t)
+            μ = max(expected[j], 1e-6)
+            Turing.@addlogprob! _negbin2_logpmf(round(Int, obs[idx, i]), μ, φ)
         end
     end
 

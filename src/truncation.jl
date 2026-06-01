@@ -61,12 +61,23 @@ function estimate_truncation(
 )
     length(data) >= 2 || throw(ArgumentError("Need at least 2 snapshots"))
 
-    sorted_snaps = [sort(df, :date) for df in data]
+    # Sort snapshots by end date so the most complete one is last (the
+    # reconstruction reference), and align all snapshots on a shared time axis
+    # starting at the earliest observed date.
+    sorted_snaps = sort([sort(df, :date) for df in data]; by=s -> s.date[end])
     epi_datas = [EpiData(df) for df in sorted_snaps]
 
-    # Extract confirm vectors; each snapshot covers a different date range
-    snapshots = [Int.(s.confirm) for s in sorted_snaps]
-    snapshot_lengths = [length(s) for s in snapshots]
+    common_start = minimum(s.date[1] for s in sorted_snaps)
+    latest_end = maximum(s.date[end] for s in sorted_snaps)
+    n_times = Dates.value(latest_end - common_start) + 1
+
+    obs = zeros(Float64, n_times, length(sorted_snaps))
+    for (i, s) in enumerate(sorted_snaps)
+        for (d, c) in zip(s.date, s.confirm)
+            obs[Dates.value(d - common_start) + 1, i] = Float64(c)
+        end
+    end
+    obs_dist = [Dates.value(latest_end - s.date[end]) for s in sorted_snaps]
 
     max_trunc = if truncation.dist isa UncertainDistribution
         Int(truncation.dist.max)
@@ -79,7 +90,7 @@ function estimate_truncation(
     verbose && @info "Estimating truncation..." n_snapshots=length(data) max_trunc
 
     model = truncation_model(
-        snapshots, snapshot_lengths, max_trunc,
+        obs, obs_dist, max_trunc,
         truncation.meanlog_prior, truncation.sdlog_prior
     )
 
