@@ -162,6 +162,25 @@ function run_julia_secondary(data)
     )
 end
 
+function run_julia_truncation(snapshots)
+    # max=10 and Normal(1,1) sdlog prior match the R reference configuration.
+    trunc_dist = EpiNow2.UncertainDistribution(
+        (m, s) -> LogNormal(m, s), [Normal(0.0, 1.0), Normal(1.0, 1.0)], 10.0
+    )
+    estimate_truncation(
+        snapshots;
+        truncation = trunc_opts(
+            trunc_dist;
+            meanlog_prior = Normal(0.0, 1.0),
+            sdlog_prior = truncated(Normal(1.0, 1.0); lower=0.0)
+        ),
+        inference = inference_opts(
+            samples=1000, warmup=500, chains=1, seed=42, progress=false
+        ),
+        verbose=false
+    )
+end
+
 # ── Main validation ──────────────────────────────────────────────────────
 
 function run_validation()
@@ -270,6 +289,52 @@ function run_validation()
             end
         else
             @warn "Skipping estimate_secondary: reference files not found"
+        end
+
+        # ── estimate_truncation ──────────────────────────────────────────
+        trunc_input_path = joinpath(REFDIR, "truncation_input.csv")
+        trunc_param_path = joinpath(REFDIR, "truncation_params.csv")
+        if isfile(trunc_input_path) && isfile(trunc_param_path)
+            println("\n", "="^70)
+            println("Validation: estimate_truncation (reporting delay)")
+            println("="^70)
+
+            tinp = CSV.read(trunc_input_path, DataFrame)
+            tinp.date = Date.(tinp.date)
+            snapshots = [
+                select(filter(r -> r.snapshot == i, tinp), :date, :confirm)
+                for i in sort(unique(tinp.snapshot))
+            ]
+
+            r_params = CSV.read(trunc_param_path, DataFrame)
+            # truncation[1] = meanlog, truncation[2] = sdlog
+            r_meanlog = only(filter(r -> r.variable == "truncation[1]", r_params).mean)
+            r_sdlog = only(filter(r -> r.variable == "truncation[2]", r_params).mean)
+
+            println("Running Julia estimate_truncation...")
+            tres = run_julia_truncation(snapshots)
+            gqs = tres.fit.generated_quantities
+            jl_meanlog = mean(g.trunc_meanlog for g in gqs)
+            jl_sdlog = mean(g.trunc_sdlog for g in gqs)
+
+            ml_err = abs(jl_meanlog - r_meanlog) / abs(r_meanlog)
+            sl_err = abs(jl_sdlog - r_sdlog) / abs(r_sdlog)
+            println("\nTruncation distribution comparison:")
+            println("  meanlog: Julia $(round(jl_meanlog, digits=3)) vs R $(round(r_meanlog, digits=3)) (rel err $(round(ml_err, digits=3)))")
+            println("  sdlog:   Julia $(round(jl_sdlog, digits=3)) vs R $(round(r_sdlog, digits=3)) (rel err $(round(sl_err, digits=3)))")
+
+            @testset "estimate_truncation" begin
+                # Julia replicates R's truncation algorithm (latent
+                # reconstruction, NegBin obs), so meanlog matches closely.
+                @test ml_err < 0.05
+                # sdlog sits ~20% above R: the package uses double interval
+                # censoring everywhere, whereas R's estimate_truncation uses its
+                # cruder Stan discretised_pmf. This is a deliberate divergence
+                # (consistent discretisation was preferred over matching R here).
+                @test sl_err < 0.25
+            end
+        else
+            @warn "Skipping estimate_truncation: reference files not found"
         end
     end
 end

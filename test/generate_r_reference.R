@@ -127,4 +127,33 @@ write.csv(
   file.path(outdir, "secondary_predictions.csv"), row.names = FALSE
 )
 
+# ── Truncation: estimate reporting delay from snapshots ──────────────
+# example_truncated is 5 snapshots of the same series taken at increasingly
+# later dates; later snapshots have more complete recent data.
+cat("Running truncation test: estimate_truncation...\n")
+trunc_fit <- estimate_truncation(
+  example_truncated,
+  truncation = trunc_opts(
+    LogNormal(meanlog = Normal(0, 1), sdlog = Normal(1, 1), max = 10)
+  ),
+  stan = stan_opts(samples = 1000, warmup = 500, chains = 2, seed = 42),
+  verbose = FALSE
+)
+# Shared input: snapshots in long format with a snapshot id
+trunc_input <- rbindlist(lapply(seq_along(example_truncated), function(i)
+  data.table(
+    snapshot = i, date = example_truncated[[i]]$date,
+    confirm = example_truncated[[i]]$confirm
+  )))
+write.csv(trunc_input, file.path(outdir, "truncation_input.csv"), row.names = FALSE)
+# Fitted truncation parameters: truncation[1] = meanlog, truncation[2] = sdlog
+trunc_s <- get_samples(trunc_fit)
+trunc_params <- trunc_s[, .(
+  mean = mean(value), median = median(value),
+  lower_90 = quantile(value, 0.05), upper_90 = quantile(value, 0.95)
+), by = variable]
+write.csv(
+  trunc_params, file.path(outdir, "truncation_params.csv"), row.names = FALSE
+)
+
 cat("Done! Reference results saved to", outdir, "\n")
