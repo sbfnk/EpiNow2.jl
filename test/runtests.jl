@@ -405,6 +405,23 @@ using Random
         @test all(result.secondary .>= 0)
     end
 
+    @testset "calculate_secondary recursion (incidence vs prevalence)" begin
+        scaled = fill(5.0, 15)
+        pmf = [0.2, 0.5, 0.3]
+        conv = EpiNow2.convolve(scaled, pmf)
+
+        # incidence: expected == convolved primary (up to the 1e-6 floor)
+        inc = EpiNow2.calculate_secondary(scaled, conv, false, true, true, false, false)
+        @test maximum(abs.(inc .- conv)) < 1e-5
+
+        # prevalence: occupancy balance Δ = inflow − outflow after the first step
+        prev = EpiNow2.calculate_secondary(scaled, conv, true, true, false, true, true)
+        @test maximum(abs.(diff(prev) .- (scaled[2:end] .- conv[2:end]))) < 1e-5
+        @test all(prev .>= 0)
+        # must NOT equal the cumulative-outflow-only series (the former bug)
+        @test !isapprox(prev, cumsum(conv))
+    end
+
     @testset "R_to_growth / growth_to_R" begin
         gt_pmf = [0.3, 0.4, 0.2, 0.1]
         # Normal case

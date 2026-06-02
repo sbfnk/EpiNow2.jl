@@ -627,6 +627,56 @@ function _negbin2_logpmf(y::Int, μ, φ)
         φ * log(φ / (μ + φ)) + y * log(μ / (μ + φ))
 end
 
+# ── Secondary observation recursion ──────────────────────────────────────
+
+"""
+    calculate_secondary(scaled_primary, conv_primary, cumulative, historic,
+                        primary_hist_additive, current, primary_current_additive;
+                        eps=1e-6)
+
+Combine a scaled primary series and its delay-convolution into an expected
+secondary series, following EpiNow2 R's `calculate_secondary` logic. The
+boolean flags come from [`secondary_opts`](@ref):
+
+- `cumulative`     — carry the previous value forward (stock, e.g. prevalence)
+- `historic`       — add (`primary_hist_additive`) or subtract the convolved history
+- `current`        — add (`primary_current_additive`) or subtract the current primary
+
+For `incidence` this returns `conv_primary`; for `prevalence` it returns the
+running balance `prev − outflow + inflow` (i.e. occupancy), not merely the
+cumulative outflow. AD-safe (works with ForwardDiff dual numbers).
+"""
+function calculate_secondary(
+    scaled_primary::AbstractVector,
+    conv_primary::AbstractVector,
+    cumulative::Bool,
+    historic::Bool,
+    primary_hist_additive::Bool,
+    current::Bool,
+    primary_current_additive::Bool;
+    eps::Real = 1e-6
+)
+    n = length(scaled_primary)
+    T = promote_type(eltype(scaled_primary), eltype(conv_primary), typeof(eps))
+    expected = Vector{T}(undef, n)
+    for i in 1:n
+        s = T(eps)
+        if cumulative && i > 1
+            s += expected[i - 1]
+        end
+        if historic
+            s = primary_hist_additive ? s + conv_primary[i] :
+                max(T(eps), s - conv_primary[i])
+        end
+        if current
+            s = primary_current_additive ? s + scaled_primary[i] :
+                max(T(eps), s - scaled_primary[i])
+        end
+        expected[i] = s
+    end
+    expected
+end
+
 # ── Secondary observations model ─────────────────────────────────────────
 
 @model function secondary_model(
@@ -654,32 +704,12 @@ end
     scaled_primary = frac .* Float64.(primary)
     conv_primary = convolve(scaled_primary, delay_pmf)
 
-    # Calculate secondary using R's calculate_secondary logic
-    expected = Vector{eltype(conv_primary)}(undef, n_total)
-    for i in 1:n_total
-        s = 1e-6
-        # Cumulative: carry forward
-        if cumulative && i > 1
-            s += expected[i - 1]
-        end
-        # Historic: add/subtract convolved history
-        if historic
-            if primary_hist_additive
-                s += conv_primary[i]
-            else
-                s = max(1e-6, s - conv_primary[i])
-            end
-        end
-        # Current: add/subtract current primary
-        if current
-            if primary_current_additive
-                s += scaled_primary[i]
-            else
-                s = max(1e-6, s - scaled_primary[i])
-            end
-        end
-        expected[i] = s
-    end
+    # Calculate secondary using the shared calculate_secondary recursion
+    expected = calculate_secondary(
+        scaled_primary, conv_primary,
+        cumulative, historic, primary_hist_additive,
+        current, primary_current_additive
+    )
 
     # Day-of-week effects
     if use_week_effect

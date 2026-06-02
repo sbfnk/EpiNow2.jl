@@ -140,11 +140,12 @@ function simulate_secondary(
 
     delay_pmf = discretise(delays.dist).pmf
     scaled = frac .* Float64.(prim)
-    expected = convolve(scaled, delay_pmf)
-
-    if secondary.type == prevalence
-        expected = cumsum(expected)
-    end
+    conv = convolve(scaled, delay_pmf)
+    expected = calculate_secondary(
+        scaled, conv,
+        secondary.cumulative, secondary.historic, secondary.primary_hist_additive,
+        secondary.current, secondary.primary_current_additive
+    )
 
     sim = [max(0, rand(Poisson(max(e, 1e-6)))) for e in expected]
 
@@ -204,11 +205,12 @@ function forecast_secondary(
 
         frac_i = frac_samples[mod1(si, n_samples)]
         scaled = frac_i .* primary_vec
-        expected = convolve(scaled, delay_pmf)
-
-        if secondary.type == prevalence
-            expected = cumsum(expected)
-        end
+        conv = convolve(scaled, delay_pmf)
+        expected = calculate_secondary(
+            scaled, conv,
+            secondary.cumulative, secondary.historic, secondary.primary_hist_additive,
+            secondary.current, secondary.primary_current_additive
+        )
 
         for t in 1:n_dates
             mat[t, si] = expected[t]
