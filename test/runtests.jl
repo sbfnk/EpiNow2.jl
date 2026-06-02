@@ -422,6 +422,22 @@ using Random
         @test !isapprox(prev, cumsum(conv))
     end
 
+    @testset "simulate_secondary prevalence is a stock not cumulative outflow (regression)" begin
+        Random.seed!(11)
+        n = 60
+        prim = DataFrame(date = Date(2024,1,1):Day(1):Date(2024,1,1)+Day(n-1), primary = fill(100, n))
+        sp = simulate_secondary(prim; delays = delay_opts(LogNormal(1.5, 0.5)),
+                                secondary = secondary_opts(prevalence), frac = 0.3)
+        # For constant admissions, occupancy (a stock) reaches a bounded steady state.
+        # The former bug returned cumsum(convolve(...)), which grows ~ frac*primary*t
+        # (into the hundreds-to-thousands by day 60).
+        tail = mean(sp.secondary[(n-9):n])
+        early = mean(sp.secondary[div(n,2):(div(n,2)+9)])
+        @test tail < 600                      # nowhere near the runaway cumulative-outflow level
+        @test tail > 0.3 * 100                # it is a stock (above one day's inflow)
+        @test abs(tail - early) < 0.5 * early # roughly flat, not still climbing like a cumsum
+    end
+
     @testset "R_to_growth / growth_to_R" begin
         gt_pmf = [0.3, 0.4, 0.2, 0.1]
         # Normal case
