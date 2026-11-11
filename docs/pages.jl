@@ -29,6 +29,8 @@ pages = [
     # docs_config.jl.
     "Getting started" => [
         "Overview" => "getting-started/index.md",
+        "Estimating Rt and forecasting" => "tutorials/estimate-infections-workflow.md",
+        "Multiple data streams" => "tutorials/secondary.md",
     ],
     "API reference" => [
         "Public API" => "lib/public.md",
