@@ -87,3 +87,21 @@ end
     @test fixed in result.dist.components
     @test !any(c -> c isa UncertainDistribution, result.dist.components)
 end
+
+@testitem "truncation observations are trimmed as in R" setup = [TestSetup] begin
+    dates = Date(2024, 1, 1):Day(1):Date(2024, 1, 30)
+    snapshots = [
+        DataFrame(date = collect(dates[1:n]), confirm = fill(10, n))
+            for n in (20, 25, 30)
+    ]
+    obs_matrix, obs_dist = EpiNow2._truncation_obs(snapshots, 10)
+    # R keeps the last `trunc_max` days of the earliest-ending snapshot and
+    # the days after it: rows 11 to 30 here.
+    @test size(obs_matrix) == (20, 3)
+    @test obs_dist == [10, 5, 0]
+    @test obs_matrix[1, :] == [10.0, 10.0, 10.0]
+    @test obs_matrix[end, :] == [0.0, 0.0, 10.0]
+
+    # A truncation longer than the data keeps every row.
+    @test size(first(EpiNow2._truncation_obs(snapshots, 40)), 1) == 30
+end
