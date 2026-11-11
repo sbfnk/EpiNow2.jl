@@ -8,7 +8,6 @@
 # `primarycensored` R package).
 # ══════════════════════════════════════════════════════════════════════════
 
-using CensoredDistributions: double_interval_censored, ExponentiallyTilted
 
 """
     EstimateDistArgs

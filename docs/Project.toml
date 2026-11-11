@@ -1,13 +1,41 @@
 [deps]
+ADFixtures = "a4d4e52d-27b0-4ae9-bfb9-48ccee6e83bd"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Chairmarks = "0ca39b1e-fe0b-4e98-acfc-b1656634c4de"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataFramesMeta = "1313f7d8-7da2-5740-9ea0-a2ca25f37964"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+DifferentiationInterfaceTest = "a82114a7-5aa3-49a8-9643-716bb13727a3"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+DocumenterVitepress = "4710194d-e776-4893-9690-8d956a29c365"
+EpiAwarePackageTools = "7aaea248-0d11-4a0d-a7dc-86da30abb951"
 EpiNow2 = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
+Markdown = "d6f4376e-aef5-505a-96c1-9c027394607a"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
+[sources]
+ADFixtures = {path = "../test/ADFixtures"}
+EpiNow2 = {path = ".."}
+
 [compat]
+CSV = "0.10"
+CairoMakie = "0.15"
+Chairmarks = "1"
+DataFrames = "1.6"
+DataFramesMeta = "0.15"
+Dates = "1"
+DifferentiationInterfaceTest = "0.9, 0.10, 0.11"
+Distributions = "0.25"
 Documenter = "1"
+DocumenterVitepress = "0.3"
+EpiAwarePackageTools = "0.4"
+ForwardDiff = "0.10, 1"
+Literate = "2"
+Markdown = "1"
+Random = "1"
+Statistics = "1"

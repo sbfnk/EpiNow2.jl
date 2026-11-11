@@ -21,21 +21,26 @@ plot(result)
 """
 module EpiNow2
 
-using ADTypes
-using CSV
-using CensoredDistributions
-using Dates
-using DataFrames
-using Distributions
-using LinearAlgebra
-using MCMCChains
-using Mooncake
-using PrecompileTools
-using Random
-using ReverseDiff
+using ADTypes: ADTypes, AutoForwardDiff, AutoMooncake, AutoReverseDiff
+using CSV: CSV
+using CensoredDistributions: CensoredDistributions, double_interval_censored,
+    ExponentiallyTilted
+using DataFrames: DataFrames, DataFrame, Not, combine, groupby, innerjoin,
+    insertcols!, nrow, select
+using Dates: Dates, Date, Day
+using Distributions: Distributions, Beta, Dirac, Dirichlet, Distribution,
+    Exponential, Gamma, LogNormal, NegativeBinomial, Normal, Poisson,
+    Truncated, Uniform, Weibull, fit, logpdf, params, pdf, scale, shape,
+    truncated
+using LinearAlgebra: LinearAlgebra
+using MCMCChains: MCMCChains
+using Mooncake: Mooncake
+using PrecompileTools: @compile_workload, @setup_workload
+using Random: Random
+using ReverseDiff: ReverseDiff
 using SpecialFunctions: loggamma, besseli
-using Statistics
-using Turing
+using Statistics: Statistics, mean, median, quantile, std
+using Turing: Turing, @model, MCMCThreads, NUTS, arraydist, filldist
 
 # ── AD backends (re-exported from ADTypes for convenience in inference_opts) ─
 export AutoForwardDiff, AutoReverseDiff, AutoMooncake
