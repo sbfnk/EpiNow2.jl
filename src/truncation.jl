@@ -31,25 +31,49 @@ struct EstimateTruncationResult
 end
 
 """
-    estimate_truncation(data; truncation, inference, verbose)
+    estimate_truncation(data; truncation, inference, CrIs = [0.2, 0.5, 0.9],
+                        verbose = true)
 
-Estimate the distribution of reporting delays from multiple snapshots of
-the same data taken at different times.
+Estimate a right-truncation distribution from several snapshots of the same
+data taken at different times. Recent counts are incomplete in earlier
+snapshots; comparing them with later snapshots gives the delay until counts
+are complete, as a lognormal distribution.
 
 # Arguments
-- `data::Vector{DataFrame}` — multiple snapshots, each with `:date` and
-  `:confirm` columns. Later snapshots should have more complete data.
-- `truncation::TruncOpts` — prior on truncation distribution
+- `data`: a vector of at least two `DataFrame` snapshots, each with `:date`
+  and `:confirm` columns. Snapshots that end later should be more complete.
+
+# Keyword Arguments
+- `truncation`: truncation options from [`trunc_opts`](@ref). Its
+  `meanlog_prior` and `sdlog_prior` set the priors on the lognormal
+  parameters, and the maximum truncation is taken from `dist` (default: a
+  lognormal with meanlog 0 and sdlog 1).
+- `inference`: inference options from [`inference_opts`](@ref).
+- `CrIs`: credible intervals to summarise (default `[0.2, 0.5, 0.9]`).
+- `verbose`: print progress messages (default `true`).
 
 # Returns
-`EstimateTruncationResult` with fitted truncation distribution that can
-be passed to `epinow()` or `estimate_infections()`.
+An `EstimateTruncationResult` whose `dist` field holds the estimated
+truncation distribution, to pass to [`trunc_opts`](@ref) for
+[`epinow`](@ref) or [`estimate_infections`](@ref).
 
-# Example
-```julia
-snapshots = [early_data, mid_data, late_data]
-trunc = estimate_truncation(snapshots)
-result = epinow(data, truncation=trunc_opts(trunc.dist), ...)
+```@example estimate_truncation
+using EpiNow2, DataFrames
+full = example_confirmed()[1:30, :]
+snapshots = map([20, 25, 30]) do last_day
+    snap = full[1:last_day, :]
+    # The most recent five days are only partly reported
+    for d in 1:5
+        snap.confirm[last_day - d + 1] = max(1, round(Int, snap.confirm[last_day - d + 1] * d / 6))
+    end
+    snap
+end
+fit = estimate_truncation(
+    snapshots;
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+fit.dist
 ```
 """
 function estimate_truncation(

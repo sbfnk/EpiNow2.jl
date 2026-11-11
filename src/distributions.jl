@@ -26,17 +26,24 @@ struct NonParametricDist
 end
 
 """
-    UncertainDistribution
+    UncertainDistribution(constructor, param_priors, max)
 
-A delay distribution with priors on its parameters. Used when the delay
-distribution itself is uncertain and parameters should be estimated.
+A delay distribution with priors on its parameters, used when the delay is
+itself uncertain and its parameters are estimated alongside the rest of the
+model.
 
-# Examples
-```julia
-# Uncertain log-normal delay
+# Fields
+- `constructor`: function taking the parameter values and returning a
+  `Distribution`, e.g. `(μ, σ) -> LogNormal(μ, σ)`.
+- `param_priors`: prior distributions on the parameters, in the order
+  `constructor` takes them.
+- `max`: maximum delay in days used when discretising.
+
+```@example UncertainDistribution
+using EpiNow2, Distributions
 UncertainDistribution(
     (μ, σ) -> LogNormal(μ, σ),
-    [Normal(1.6, 0.2), truncated(Normal(0.5, 0.1); lower=0.0)],
+    [Normal(1.6, 0.2), truncated(Normal(0.5, 0.1); lower = 0.0)],
     14.0
 )
 ```
@@ -58,10 +65,20 @@ Union type for all delay distribution specifications:
 const DelayDistribution = Union{Distribution, NonParametricDist, UncertainDistribution}
 
 """
-    CompositeDelay
+    CompositeDelay(components)
 
-Multiple delay distributions to be convolved sequentially
-(e.g., incubation period + reporting delay).
+Several delay distributions convolved in sequence, e.g. incubation period
+plus reporting delay. Created by adding delay distributions with `+`;
+[`discretise`](@ref) turns it into a single [`NonParametricDist`](@ref).
+
+# Fields
+- `components`: the delay distributions, in the order they are convolved.
+
+```@example CompositeDelay
+using EpiNow2
+delay = example_incubation_period() + example_reporting_delay()
+discretise(delay)
+```
 """
 struct CompositeDelay
     components::Vector{DelayDistribution}
@@ -176,20 +193,30 @@ Base.:+(a::DelayDistribution, b::CompositeDelay) =
 # ── Discretisation ───────────────────────────────────────────────────────
 
 """
-    discretise(d::Distribution; max=nothing, cdf_cutoff=0.001) -> NonParametricDist
+    discretise(d::Distribution; max = nothing, cdf_cutoff = 0.001) -> NonParametricDist
 
-Discretise a continuous distribution into a PMF using double interval
-censoring (matching R's `discretise()`). Returns a `NonParametricDist`
-that supports `+` for convolution.
+Discretise a continuous distribution into a probability mass function using
+double interval censoring (matching R's `discretise()`). The result is a
+[`NonParametricDist`](@ref), which supports `+` for convolution.
 
-The PMF is 0-indexed: `pmf[1]` = P(delay=0), `pmf[2]` = P(delay=1), etc.
+The PMF is 0-indexed: `pmf[1]` = P(delay = 0), `pmf[2]` = P(delay = 1), etc.
 
-# Examples
-```julia
-discretise(LogNormal(1.6, 0.5))              # auto max from cdf_cutoff
-discretise(LogNormal(1.6, 0.5); max=14)      # explicit max
-discretise(LogNormal(1.0, 0.5); max=14) +    # compose with +
-    discretise(LogNormal(0.5, 0.3); max=7)
+# Arguments
+- `d`: the delay distribution to discretise.
+
+# Keyword Arguments
+- `max`: maximum delay in days. If `nothing` (default), it is the
+  `1 - cdf_cutoff` quantile of `d`, rounded up.
+- `cdf_cutoff`: tail probability dropped when `max` is not given (default
+  0.001).
+
+```@example discretise
+using EpiNow2, Distributions
+discretise(LogNormal(1.6, 0.5); max = 14)
+```
+
+```@example discretise
+discretise(LogNormal(1.0, 0.5); max = 14) + discretise(LogNormal(0.5, 0.3); max = 7)
 ```
 """
 function discretise(
@@ -260,8 +287,17 @@ end
 """
     convolve_pmfs(a, b) -> NonParametricDist or Vector{Float64}
 
-Convolve two discretised distributions or raw PMF vectors.
-Equivalent to `a + b` for `NonParametricDist`.
+Convolve two discretised distributions or raw PMF vectors. For
+[`NonParametricDist`](@ref) arguments this is the same as `a + b`.
+
+# Arguments
+- `a`, `b`: two `NonParametricDist`s, or two PMF vectors indexed from delay
+  0.
+
+```@example convolve_pmfs
+using EpiNow2
+convolve_pmfs([0.5, 0.5], [0.2, 0.8])
+```
 """
 convolve_pmfs(a::NonParametricDist, b::NonParametricDist) = a + b
 convolve_pmfs(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}) =

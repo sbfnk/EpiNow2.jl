@@ -208,42 +208,53 @@ end
 # ── Main entry point ────────────────────────────────────────────────────────
 
 """
-    estimate_dist(data; dist=:lognormal, priors=nothing, primary=:uniform,
-                  obs_time_threshold=2.0, inference=inference_opts(),
-                  verbose=false)
+    estimate_dist(data; dist = :lognormal, priors = nothing, primary = :uniform,
+                  primary_params = Float64[], obs_time_threshold = 2.0,
+                  inference = inference_opts(), verbose = false)
 
-Estimate a delay distribution using interval-censored MCMC inference,
-mirroring EpiNow2 R v1.8's `estimate_dist()`.
+Estimate a delay distribution from censored and possibly right-truncated
+delay data by MCMC, accounting for the interval censoring of both the
+primary and the secondary event. Mirrors EpiNow2's `estimate_dist()`.
 
-# Data formats
+# Arguments
+- `data`: a `DataFrame` in one of two formats. The R format has date columns
+  `pdate_lwr` (and optionally `pdate_upr`) for the primary event,
+  `sdate_lwr` (and optionally `sdate_upr`) for the secondary event, and
+  optionally `obs_date` (date of observation) and `n` (count). The simple
+  format has a single `:delay` column of non-negative integer delays, with
+  daily censoring windows and no truncation.
 
-The input `DataFrame` may be either:
-
-- **R-style**: columns `pdate_lwr` (and optional `pdate_upr`), `sdate_lwr`
-  (and optional `sdate_upr`), optional `obs_date`, optional `n`. Dates are
-  `Date` values.
-- **Simple**: a single `:delay` column of non-negative integer delays.
-  Daily primary/secondary windows are assumed and observations are treated
-  as untruncated.
-
-# Distribution choice
-
-`dist` selects the parametric family. Currently `:lognormal` (default) and
-`:gamma` are supported; for others write a custom Turing model using
-`CensoredDistributions.double_interval_censored` directly.
-
-`priors` optionally overrides the defaults — supply a `Vector{Distribution}`
-in the same parameter order as the constructor (e.g. `[meanlog_prior,
-sdlog_prior]` for LogNormal).
-
-`obs_time_threshold` controls the obs-time-to-Inf heuristic
-(observations whose `obs_time` exceeds `obs_time_threshold * max(delay)`
-are treated as untruncated, matching the `epidist` convention).
+# Keyword Arguments
+- `dist`: the distribution family, `:lognormal` (default) or `:gamma`.
+- `priors`: priors on the distribution parameters, as a vector in the order
+  the constructor takes them (e.g. `[meanlog_prior, sdlog_prior]` for a
+  lognormal); `nothing` (default) uses built-in priors.
+- `primary`: distribution of the primary event within its window, `:uniform`
+  (default) or `:expgrowth` (exponential growth).
+- `primary_params`: the growth rate, as a one-element vector, when
+  `primary = :expgrowth`.
+- `obs_time_threshold`: observations whose observation time exceeds
+  `obs_time_threshold` times the maximum delay are treated as not
+  truncated, following the epidist convention (default 2).
+- `inference`: inference options from [`inference_opts`](@ref).
+- `verbose`: print progress messages (default `false`).
 
 # Returns
+An `EstimateDistResult` whose `fitted` field is an
+[`UncertainDistribution`](@ref) with normal priors from the posterior mean
+and standard deviation of each parameter, ready for [`delay_opts`](@ref),
+[`gt_opts`](@ref) or [`trunc_opts`](@ref). Its `chain` field holds the
+posterior samples.
 
-An `EstimateDistResult` with a posterior-mean `UncertainDistribution`
-suitable for passing to `delay_opts()` / `gt_opts()` / `trunc_opts()`.
+```@example estimate_dist
+using EpiNow2, DataFrames, Distributions
+data = DataFrame(delay = round.(Int, rand(LogNormal(1.5, 0.5), 100)))
+fit = estimate_dist(
+    data;
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false)
+)
+fit.fitted
+```
 """
 function estimate_dist(
         data::DataFrame;

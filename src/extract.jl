@@ -98,16 +98,34 @@ end
 # ── Accessors ────────────────────────────────────────────────────────────
 
 """
-    get_samples(result; variable=nothing, predictive=false) -> DataFrame
+    get_samples(result; variable = nothing, predictive = false) -> DataFrame
 
-Extract posterior samples as a long-format DataFrame.
+Get posterior samples of the generated quantities (e.g. `:infections`,
+`:reports`, `:R`) in long format, with columns `date`, `variable`, `sample`
+and `value`.
 
-Columns: `date`, `variable`, `sample`, `value`
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
 
-By default the values are the latent generated quantities. With
-`predictive=true`, `:reports` samples are drawn through the fitted observation
-model (NegBin/Poisson), giving the posterior predictive of reported cases;
-other variables are returned unchanged.
+# Keyword Arguments
+- `variable`: name of the variable to return, as a `Symbol`; `nothing`
+  (default) returns all.
+- `predictive`: if `true`, `:reports` samples are drawn through the fitted
+  observation model, giving the posterior predictive of reported cases
+  rather than their expectation. Other variables are unchanged. Default
+  `false`.
+
+```@example get_samples
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+first(get_samples(fit; variable = :R), 5)
+```
 """
 function get_samples(
         result::EstimateInfectionsResult; variable = nothing, predictive = false
@@ -153,20 +171,39 @@ get_samples(result::EpinowResult; kwargs...) =
     get_samples(result.estimates; kwargs...)
 
 """
-    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9],
-                    quantiles=[0.05, 0.25, 0.5, 0.75, 0.95])
+    get_predictions(result; format = :summary, CrIs = [0.2, 0.5, 0.9],
+                    quantiles = [0.05, 0.25, 0.5, 0.75, 0.95])
 
-Extract case predictions in one of three formats:
+Get predictions of reported cases from a fitted model, including the
+forecast horizon.
 
-- `:summary` — pre-computed posterior summary (`result.reports`).
-  `CrIs` controls the credible-interval columns surfaced.
-- `:sample` — long-format posterior samples ready for
-  `scoringutils::as_forecast_sample()`. Columns: `forecast_date`, `date`,
-  `horizon`, `sample`, `predicted`.
-- `:quantile` — quantile predictions ready for
-  `scoringutils::as_forecast_quantile()`. Columns: `forecast_date`,
-  `date`, `horizon`, `quantile_level`, `predicted`. `quantiles`
-  controls the quantile levels.
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `format`: the output format. `:summary` (default) returns the posterior
+  predictive summary in `result.reports`. `:sample` returns posterior
+  predictive samples in long format, with columns `forecast_date`, `date`,
+  `horizon`, `sample` and `predicted`, as expected by
+  `scoringutils::as_forecast_sample()`. `:quantile` returns quantiles with
+  columns `forecast_date`, `date`, `horizon`, `quantile_level` and
+  `predicted`, as expected by `scoringutils::as_forecast_quantile()`.
+- `CrIs`: credible intervals (default `[0.2, 0.5, 0.9]`). The `:summary`
+  format returns the intervals computed at fitting time.
+- `quantiles`: quantile levels for the `:quantile` format (default
+  `[0.05, 0.25, 0.5, 0.75, 0.95]`).
+
+```@example get_predictions
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+last(get_predictions(fit; format = :quantile), 5)
+```
 """
 function get_predictions(
         result::EstimateInfectionsResult;
@@ -228,7 +265,26 @@ end
 """
     get_parameters(result) -> Dict{Symbol, Any}
 
-Extract fitted scalar parameters from the chain.
+Get the posterior samples of the scalar parameters of a fitted model, such
+as the Gaussian process hyperparameters and the overdispersion, as a `Dict`
+from parameter name to vector of samples. Vector-valued parameters are left
+out.
+
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref), [`epinow`](@ref),
+  [`estimate_secondary`](@ref) or [`estimate_truncation`](@ref).
+
+```@example get_parameters
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+keys(get_parameters(fit))
+```
 """
 get_parameters(result::EpinowResult) = get_parameters(result.estimates)
 
@@ -501,14 +557,33 @@ function _parameter_summary(result, CrIs)
 end
 
 """
-    get_imputed_reports(result; CrIs=[0.2, 0.5, 0.9])
+    get_imputed_reports(result; CrIs = [0.2, 0.5, 0.9])
 
-Generate integer-valued imputed report draws by sampling from the fitted
-observation model (NegBin or Poisson) for each posterior sample. This is the
-posterior predictive of reported cases — the same quantity surfaced as
-`result.reports`, recomputable here at custom credible-interval levels.
+Summarise integer-valued draws of reported cases from the fitted observation
+model (negative binomial or Poisson) for each posterior sample. This is the
+posterior predictive in `result.reports`, recomputed here for other credible
+intervals.
 
-Returns a summary DataFrame matching the format of `result.reports`.
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `CrIs`: credible intervals to summarise (default `[0.2, 0.5, 0.9]`).
+
+# Returns
+A summary `DataFrame` in the format of `result.reports`.
+
+```@example get_imputed_reports
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+last(get_imputed_reports(fit; CrIs = [0.95]), 5)
+```
 """
 function get_imputed_reports(
         result::EstimateInfectionsResult;

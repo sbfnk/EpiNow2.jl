@@ -7,16 +7,18 @@ A Julia implementation of the EpiNow2 methodology, providing an opinionated,
 batteries-included interface for Rt estimation using Turing.jl for inference.
 
 # Quick start
-```julia
+```@example EpiNow2
 using EpiNow2
-
 result = epinow(
-    data,
-    generation_time = gt_opts(LogNormal(1.6, 0.5)),
-    delays = delay_opts(LogNormal(0.5, 0.5))
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(
+        discretise(example_incubation_period() + example_reporting_delay())
+    ),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
 )
 summary(result)
-plot(result)
 ```
 """
 module EpiNow2
@@ -97,9 +99,70 @@ include("utilities.jl")
 include("estimate_dist.jl")
 include("r_bridge.jl")
 
-# Stubs for plotting functions (implemented by CairoMakie extension)
+"""
+    report_plots(result; CrI = 0.9, forecast_date = nothing)
+
+Plot the estimates of a fitted model, one figure per quantity: infections,
+reported cases (with the observed data), Rt and growth rate. Requires
+CairoMakie to be loaded.
+
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `CrI`: the credible interval to shade (default 0.9).
+- `forecast_date`: date separating estimates from forecasts; `nothing`
+  (default) uses the last date of the data.
+
+# Returns
+A `Dict` from `:infections`, `:reports`, `:rt` and `:growth_rate` to a
+`Figure`.
+
+```@example report_plots
+using EpiNow2, CairoMakie
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+report_plots(fit)[:rt]
+```
+"""
 function report_plots end
+
+"""
+    plot_summary(result; CrI = 0.9, forecast_date = nothing)
+
+Plot Rt and reported cases (with the observed data) of a fitted model side
+by side in one figure. Requires CairoMakie to be loaded.
+
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `CrI`: the credible interval to shade (default 0.9).
+- `forecast_date`: date separating estimates from forecasts; `nothing`
+  (default) uses the last date of the data.
+
+# Returns
+A `Figure`.
+
+```@example plot_summary
+using EpiNow2, CairoMakie
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+plot_summary(fit)
+```
+"""
 function plot_summary end
+
 export report_plots, plot_summary
 
 # ── Precompile workload ───────────────────────────────────────────────────

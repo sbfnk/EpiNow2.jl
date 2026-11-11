@@ -1083,13 +1083,27 @@ Derivative of the negative MGF w.r.t. r.
 _dneg_mgf_dr(r, w) = -sum(w[i] * i * exp(-r * i) for i in eachindex(w))
 
 """
-    R_to_growth(R, gt_pmf; newton_steps=2)
+    R_to_growth(R, gt_pmf; newton_steps = 2)
 
-Convert reproduction number R to exponential growth rate r.
-Solves G(r) = 1/R where G is the negative MGF of the generation interval.
+Convert a reproduction number to an exponential growth rate by solving
+`M(-r) = 1 / R`, where `M` is the moment generating function of the
+generation time. The inverse of [`growth_to_R`](@ref).
 
-Uses a fixed number of Newton steps (default 2), which is AD-safe since the
-loop count is deterministic. Based on the approach in EpiAware.jl.
+A fixed number of Newton steps from a small-growth-rate approximation keeps
+the calculation differentiable with automatic differentiation.
+
+# Arguments
+- `R`: the reproduction number.
+- `gt_pmf`: generation time probability mass function, with `gt_pmf[i]` the
+  probability of a generation time of `i` days.
+
+# Keyword Arguments
+- `newton_steps`: number of Newton steps (default 2).
+
+```@example R_to_growth
+using EpiNow2
+R_to_growth(1.5, [0.2, 0.5, 0.3])
+```
 """
 function R_to_growth(R, gt_pmf; newton_steps::Int = 2)
     n = length(gt_pmf)

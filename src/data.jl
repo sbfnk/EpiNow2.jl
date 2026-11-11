@@ -96,8 +96,14 @@ end
 """
     example_confirmed() -> DataFrame
 
-Return a DataFrame with ~60 days of synthetic case data for use in examples
-and testing. Columns: `:date` and `:confirm`.
+Example case data: 60 days of synthetic daily case counts from a renewal
+process with a slowly oscillating Rt, starting on 1 March 2024. Columns:
+`:date` and `:confirm`.
+
+```@example example_confirmed
+using EpiNow2
+first(example_confirmed(), 5)
+```
 """
 function example_confirmed()
     n_days = 60
@@ -123,8 +129,13 @@ end
 """
     example_generation_time()
 
-Example generation time distribution for COVID-19 (Ganyani et al. 2020).
-Mean 3.6 days, SD 3.1 days, as a LogNormal.
+Example generation time for COVID-19 (Ganyani et al. 2020): a lognormal
+distribution with mean 3.6 days and standard deviation 3.1 days.
+
+```@example example_generation_time
+using EpiNow2
+gt_opts(example_generation_time())
+```
 """
 function example_generation_time()
     return LogNormal(_moments_to_lognormal(3.6, 3.1)...)
@@ -133,8 +144,13 @@ end
 """
     example_incubation_period()
 
-Example incubation period for COVID-19 (Lauer et al. 2020).
-Mean 5.2 days, SD 2.8 days, as a LogNormal.
+Example incubation period for COVID-19 (Lauer et al. 2020): a lognormal
+distribution with mean 5.2 days and standard deviation 2.8 days.
+
+```@example example_incubation_period
+using EpiNow2
+delay_opts(example_incubation_period())
+```
 """
 function example_incubation_period()
     return LogNormal(_moments_to_lognormal(5.2, 2.8)...)
@@ -143,8 +159,13 @@ end
 """
     example_reporting_delay()
 
-Example reporting delay (onset to report) for COVID-19.
-Mean 2.0 days, SD 1.0 day, as a LogNormal.
+Example delay from symptom onset to report for COVID-19: a lognormal
+distribution with mean 2 days and standard deviation 1 day.
+
+```@example example_reporting_delay
+using EpiNow2
+delay_opts(example_reporting_delay())
+```
 """
 function example_reporting_delay()
     return LogNormal(_moments_to_lognormal(2.0, 1.0)...)
