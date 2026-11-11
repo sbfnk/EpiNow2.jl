@@ -297,7 +297,7 @@ nuts
 Generation time options. Construct with [`gt_opts`](@ref).
 """
 Base.@kwdef struct GTOpts
-    dist::DelayDistribution = Dirac(1.0)
+    dist::Union{DelayDistribution, CompositeDelay} = Dirac(1.0)
     weight_prior::Bool = true
 end
 
@@ -327,7 +327,7 @@ using EpiNow2
 gt_opts(example_generation_time())
 ```
 """
-gt_opts(dist::DelayDistribution = Dirac(1.0); kwargs...) =
+gt_opts(dist::Union{DelayDistribution, CompositeDelay} = Dirac(1.0); kwargs...) =
     GTOpts(; dist, kwargs...)
 
 # ── Reporting delays ─────────────────────────────────────────────────────
@@ -338,7 +338,7 @@ gt_opts(dist::DelayDistribution = Dirac(1.0); kwargs...) =
 Reporting delay options. Construct with [`delay_opts`](@ref).
 """
 Base.@kwdef struct DelayOpts
-    dist::DelayDistribution = Dirac(0.0)
+    dist::Union{DelayDistribution, CompositeDelay} = Dirac(0.0)
     weight_prior::Bool = true
 end
 
@@ -350,8 +350,8 @@ Delay distribution options, for the delays between infection and report.
 # Arguments
 - `dist`: the delay distribution, any [`DelayDistribution`](@ref). To use
   several delays in sequence, e.g. incubation period plus reporting delay,
-  add them with `+` and [`discretise`](@ref) the result. The default is a
-  fixed distribution with all mass at 0, i.e. no delay.
+  add them with `+`; the parts can be fixed or have uncertain parameters.
+  The default is a fixed distribution with all mass at 0, i.e. no delay.
 
 # Keyword Arguments
 - `weight_prior`: if `true` (default), priors on the parameters of `dist` are
@@ -363,29 +363,26 @@ A `DelayOpts` object.
 
 ```@example delay_opts
 using EpiNow2
-delay_opts(discretise(example_incubation_period() + example_reporting_delay()))
+delay_opts(example_incubation_period() + example_reporting_delay())
 ```
 """
-delay_opts(dist::DelayDistribution = Dirac(0.0); kwargs...) =
+delay_opts(dist::Union{DelayDistribution, CompositeDelay} = Dirac(0.0); kwargs...) =
     DelayOpts(; dist, kwargs...)
 
 # ── Truncation ───────────────────────────────────────────────────────────
 
 """
-    TruncOpts(; dist, weight_prior, meanlog_prior, sdlog_prior)
+    TruncOpts(; dist, weight_prior)
 
 Right-truncation options. Construct with [`trunc_opts`](@ref).
 """
 Base.@kwdef struct TruncOpts
-    dist::DelayDistribution = Dirac(0.0)
+    dist::Union{DelayDistribution, CompositeDelay} = Dirac(0.0)
     weight_prior::Bool = false
-    meanlog_prior::Distribution = Normal(0.0, 1.0)
-    sdlog_prior::Distribution = truncated(Normal(0.5, 0.5); lower = 0.01)
 end
 
 """
-    trunc_opts(dist = Dirac(0.0); weight_prior = false, meanlog_prior,
-               sdlog_prior)
+    trunc_opts(dist = Dirac(0.0); weight_prior = false)
 
 Right-truncation distribution options.
 
@@ -398,11 +395,6 @@ Right-truncation distribution options.
 - `weight_prior`: if `true`, priors on the truncation parameters are weighted
   by the number of observations; if `false` (default) they are treated as a
   single parameter.
-- `meanlog_prior`: prior on the log-mean of the lognormal truncation
-  distribution used by [`estimate_truncation`](@ref) (default:
-  `Normal(0, 1)`).
-- `sdlog_prior`: prior on its log-standard deviation (default: `Normal(0.5,
-  0.5)` truncated below at 0.01).
 
 # Returns
 A `TruncOpts` object.
@@ -412,7 +404,7 @@ using EpiNow2
 trunc_opts(discretise(example_reporting_delay(); max = 10))
 ```
 """
-trunc_opts(dist::DelayDistribution = Dirac(0.0); kwargs...) =
+trunc_opts(dist::Union{DelayDistribution, CompositeDelay} = Dirac(0.0); kwargs...) =
     TruncOpts(; dist, kwargs...)
 
 # ── Reproduction number ─────────────────────────────────────────────────
@@ -450,7 +442,9 @@ Time-varying reproduction number options.
   cases (default `true`)? If `false`, infections are back-calculated (see
   [`backcalc_opts`](@ref)).
 - `rw`: step size of a random walk on Rt in days; 0 (default) means no random
-  walk, 7 a weekly random walk.
+  walk, 7 a weekly random walk. The random walk is combined with the Gaussian
+  process unless `gp = nothing` is passed to the estimation function, as in
+  R.
 - `future`: how Rt is treated beyond the data, a [`ForecastMode`](@ref):
   `latest` (default), `project` or `estimate`.
 - `fixed_from`: when `future = estimate`, the number of days before the end
@@ -484,8 +478,8 @@ Options for the approximate Gaussian process. Construct with
 [`gp_opts`](@ref).
 """
 Base.@kwdef struct GPOpts
-    basis_prop::Float64 = 0.2
-    boundary_scale::Float64 = 1.5
+    basis_prop::Union{Nothing, Float64} = nothing
+    boundary_scale::Union{Nothing, Float64} = nothing
     ls::Distribution = truncated(LogNormal(_moments_to_lognormal(21.0, 7.0)...); upper = 60.0)
     alpha::Distribution = Normal(0.0, 0.01)
     kernel::GPKernel = matern
@@ -494,18 +488,21 @@ Base.@kwdef struct GPOpts
 end
 
 """
-    gp_opts(; basis_prop = 0.2, boundary_scale = 1.5, ls, alpha,
+    gp_opts(; basis_prop = nothing, boundary_scale = nothing, ls, alpha,
             kernel = matern, matern_order = 1.5, w0 = 1.0)
 
 Approximate Gaussian process options, for the Hilbert space approximation
-used to smooth Rt (or infections when back-calculating).
+used to smooth Rt (or infections when back-calculating). Pass `gp = nothing`
+to the estimation functions to switch the Gaussian process off.
 
 # Keyword Arguments
-- `basis_prop`: proportion of time points to use as basis functions (default
-  0.2). Lower values are faster but less accurate; 0 turns the Gaussian
-  process off.
+- `basis_prop`: proportion of time points to use as basis functions. Lower
+  values are faster but less accurate. The default, `nothing`, chooses the
+  number of basis functions from the 5% quantile of the lengthscale prior
+  `ls`, as in R.
 - `boundary_scale`: boundary factor of the approximation relative to the
-  half-range of the time points (default 1.5).
+  half-range of the time points. The default, `nothing`, chooses it from the
+  95% quantile of `ls` (and uses 1.5 for the periodic kernel), as in R.
 - `ls`: prior on the lengthscale in days. Defaults to a lognormal with mean
   21 and standard deviation 7, truncated at 60.
 - `alpha`: prior on the magnitude, roughly the expected standard deviation
@@ -655,7 +652,7 @@ Turing.jl inference options. Construct with [`inference_opts`](@ref).
 Base.@kwdef struct InferenceOpts
     sampler::InferenceSampler = nuts
     samples::Int = 2000
-    warmup::Int = 250
+    warmup::Int = 500
     chains::Int = 4
     seed::Union{Int, Nothing} = nothing
     target_acceptance::Float64 = 0.9
@@ -665,7 +662,7 @@ Base.@kwdef struct InferenceOpts
 end
 
 """
-    inference_opts(; sampler = nuts, samples = 2000, warmup = 250, chains = 4,
+    inference_opts(; sampler = nuts, samples = 2000, warmup = 500, chains = 4,
                    seed = nothing, target_acceptance = 0.9,
                    max_treedepth = 12, progress = true,
                    adtype = AutoForwardDiff())
@@ -675,9 +672,10 @@ Options for the Turing.jl inference backend, in place of EpiNow2's
 
 # Keyword Arguments
 - `sampler`: the sampler, an [`InferenceSampler`](@ref) (only `nuts`).
-- `samples`: number of posterior samples per chain (default 2000).
+- `samples`: total number of posterior samples across all chains (default
+  2000), as in R; each chain draws `ceil(samples / chains)`.
 - `warmup`: number of warmup (adaptation) iterations per chain (default
-  250).
+  500).
 - `chains`: number of MCMC chains (default 4), run in parallel across Julia
   threads.
 - `seed`: random seed, or `nothing` (default) for none.

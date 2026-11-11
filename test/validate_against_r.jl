@@ -165,15 +165,12 @@ end
 function run_julia_truncation(snapshots)
     # max=10 and Normal(1,1) sdlog prior match the R reference configuration.
     trunc_dist = EpiNow2.UncertainDistribution(
-        (m, s) -> LogNormal(m, s), [Normal(0.0, 1.0), Normal(1.0, 1.0)], 10.0
+        (m, s) -> LogNormal(m, s),
+        [Normal(0.0, 1.0), truncated(Normal(1.0, 1.0); lower = 0.0)], 10.0
     )
     return estimate_truncation(
         snapshots;
-        truncation = trunc_opts(
-            trunc_dist;
-            meanlog_prior = Normal(0.0, 1.0),
-            sdlog_prior = truncated(Normal(1.0, 1.0); lower = 0.0)
-        ),
+        truncation = trunc_opts(trunc_dist),
         inference = inference_opts(
             samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),

@@ -39,7 +39,7 @@
     # get_parameters
     params = get_parameters(result)
     @test params isa Dict
-    @test :R0 in keys(params)
+    @test :R_mean in keys(params)
 
     # summary
     s = summary(result)

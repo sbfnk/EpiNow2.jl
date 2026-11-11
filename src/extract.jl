@@ -17,7 +17,7 @@ struct EstimateInfectionsArgs
     truncation::TruncOpts
     rt::RtOpts
     backcalc::BackcalcOpts
-    gp::GPOpts
+    gp::Union{GPOpts, Nothing}
     obs::ObsOpts
     forecast::ForecastOpts
     inference::InferenceOpts

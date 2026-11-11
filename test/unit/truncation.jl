@@ -30,7 +30,35 @@
 
     @test result isa EpiNow2.EstimateTruncationResult
     @test result.dist isa LogNormal
+    @test result.args.obs.family == negbin
     # v1.8 epinowfit parity: args round-trip
     @test result.args isa EpiNow2.EstimateTruncationArgs
     @test result.args.inference.samples == 100
+end
+
+@testitem "estimate_truncation with a Poisson model and gamma truncation" setup = [TestSetup] begin
+    dates = Date(2024, 1, 1):Day(1):Date(2024, 1, 30)
+    full_cases = round.(Int, 100 .* exp.(0.03 .* (1:30)))
+    snapshots = [
+        DataFrame(date = collect(dates[1:n]), confirm = full_cases[1:n])
+            for n in (20, 25, 30)
+    ]
+    result = estimate_truncation(
+        snapshots;
+        truncation = trunc_opts(
+            UncertainDistribution(
+                (shape, rate) -> Gamma(shape, 1 / rate),
+                [
+                    truncated(Normal(2.0, 0.5); lower = 0.0),
+                    truncated(Normal(1.0, 0.2); lower = 0.0),
+                ],
+                10.0
+            )
+        ),
+        obs = obs_opts(family = poisson),
+        inference = _fast_inference(),
+        verbose = false
+    )
+    @test result.dist isa Gamma
+    @test !(:reporting_overdispersion in names(result.fit.chain))
 end

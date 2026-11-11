@@ -23,7 +23,8 @@ approximate Gaussian process prior.
 - `rt`: reproduction number options from [`rt_opts`](@ref). Use
   `rt_opts(use_rt = false)` to back-calculate infections instead.
 - `backcalc`: back-calculation options from [`backcalc_opts`](@ref).
-- `gp`: Gaussian process options from [`gp_opts`](@ref).
+- `gp`: Gaussian process options from [`gp_opts`](@ref), or `nothing` to
+  switch the Gaussian process off (for example with a random walk).
 - `obs`: observation model options from [`obs_opts`](@ref).
 - `forecast`: forecast options from [`forecast_opts`](@ref).
 - `inference`: inference options from [`inference_opts`](@ref).
@@ -45,6 +46,7 @@ fit = estimate_infections(
         discretise(example_incubation_period() + example_reporting_delay())
     ),
     rt = rt_opts(rw = 7),
+    gp = nothing,
     inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
     verbose = false
 )
@@ -58,7 +60,7 @@ function estimate_infections(
         truncation::TruncOpts = trunc_opts(),
         rt::RtOpts = rt_opts(),
         backcalc::BackcalcOpts = backcalc_opts(),
-        gp::GPOpts = gp_opts(),
+        gp::Union{GPOpts, Nothing} = gp_opts(),
         obs::ObsOpts = obs_opts(),
         forecast::ForecastOpts = forecast_opts(),
         inference::InferenceOpts = inference_opts(),
@@ -83,6 +85,10 @@ function estimate_infections(
 
     verbose && @info "Inference complete" seconds = round(elapsed, digits = 1)
 
+    if :gp_rho in names(fit.chain)
+        check_gp_lengthscale(vec(Array(fit.chain[:gp_rho])), assembled.metadata)
+    end
+
     args = EstimateInfectionsArgs(
         generation_time, delays, truncation, rt, backcalc, gp, obs,
         forecast, inference, CrIs,
@@ -92,7 +98,8 @@ end
 
 """
     epinow(data; generation_time, delays, truncation, rt, backcalc, gp, obs,
-           forecast, inference, CrIs, target_folder = nothing, verbose)
+           forecast, inference, CrIs, target_folder = nothing,
+           target_date = nothing, verbose)
 
 Estimate infections, the time-varying reproduction number and the growth
 rate, and forecast reported cases. A wrapper around
@@ -109,6 +116,10 @@ rate, and forecast reported cases. A wrapper around
 - `target_folder`: directory in which to save the summaries of infections,
   reports, Rt and growth rate as CSV files; `nothing` (default) saves
   nothing.
+- `target_date`: the `Date` the forecast horizon counts from. When it lies
+  after the last date in `data`, the horizon is extended so the forecast
+  still reaches `forecast.horizon` days beyond it, as in R. `nothing`
+  (default) counts from the last date in `data`.
 
 # Returns
 An `EpinowResult` whose `estimates` field holds the
@@ -133,15 +144,25 @@ function epinow(
         truncation::TruncOpts = trunc_opts(),
         rt::RtOpts = rt_opts(),
         backcalc::BackcalcOpts = backcalc_opts(),
-        gp::GPOpts = gp_opts(),
+        gp::Union{GPOpts, Nothing} = gp_opts(),
         obs::ObsOpts = obs_opts(),
         forecast::ForecastOpts = forecast_opts(),
         inference::InferenceOpts = inference_opts(),
         CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
         target_folder::Union{String, Nothing} = nothing,
+        target_date::Union{Date, Nothing} = nothing,
         verbose::Bool = true
     )
     t0 = time()
+
+    # Forecast `forecast.horizon` days beyond the target date rather than
+    # beyond the last date in the data, as R's `update_horizon()` does.
+    if !isnothing(target_date) && forecast.horizon != 0
+        forecast = forecast_opts(
+            horizon = forecast.horizon +
+                Dates.value(target_date - maximum(data.date))
+        )
+    end
 
     estimates = estimate_infections(
         data;

@@ -52,14 +52,16 @@ function _sample(model, opts::InferenceOpts)
     return if opts.chains > 1
         Turing.sample(
             model, sampler, MCMCThreads(),
-            opts.samples, opts.chains;
+            _samples_per_chain(opts), opts.chains;
             num_warmup = opts.warmup,
+            initial_params = [_initial_params(model) for _ in 1:opts.chains],
             progress = opts.progress,
         )
     else
         Turing.sample(
-            model, sampler, opts.samples;
+            model, sampler, _samples_per_chain(opts);
             num_warmup = opts.warmup,
+            initial_params = _initial_params(model),
             progress = opts.progress,
         )
     end
@@ -76,6 +78,19 @@ struct EpiNow2Fit{M, G}
     chain::MCMCChains.Chains
     generated_quantities::Vector{G}
     metadata::M
+end
+
+# Each chain draws its share of the total number of samples, as R does.
+_samples_per_chain(opts::InferenceOpts) = cld(opts.samples, opts.chains)
+
+# Start R_mean from a draw of the Rt prior, as R does, so chains begin at
+# plausible values of Rt; everything else starts uniformly in (-2, 2) on the
+# unconstrained scale, NUTS's default.
+function _initial_params(model)
+    fallback = InitFromUniform()
+    args = model.args
+    (hasproperty(args, :use_rt) && args.use_rt) || return fallback
+    return InitFromParams((; R_mean = rand(args.rt_prior)), fallback)
 end
 
 # ── Sampler construction ─────────────────────────────────────────────────

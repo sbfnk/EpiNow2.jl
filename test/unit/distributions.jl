@@ -173,3 +173,10 @@ end
     @test ud isa UncertainDistribution
     @test length(ud.param_priors) == 2
 end
+
+@testitem "options display composite delays" setup = [TestSetup] begin
+    delays = delay_opts(LogNormal(1.6, 0.5) + discretise(LogNormal(0.5, 0.3); max = 7))
+    shown = sprint(show, MIME"text/plain"(), delays)
+    @test occursin("Composite distribution:", shown)
+    @test occursin("lognormal", shown)
+end
