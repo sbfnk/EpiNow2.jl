@@ -34,7 +34,7 @@ By default Rt follows a Gaussian process (Matérn 3/2 kernel, Hilbert space appr
 
 ## Learning more
 
-- [Estimating Rt and forecasting](tutorials/estimate-infections-workflow.md) walks through a full analysis.
-- [Multiple data streams](tutorials/secondary.md) covers `estimate_secondary()`.
+- [Estimating Rt and forecasting](../tutorials/estimate-infections-workflow.md) walks through a full analysis.
+- [Multiple data streams](../tutorials/secondary.md) covers `estimate_secondary()`.
 - The [Public API](@ref public-api) documents every function.
 - Report a problem or ask a question on the [GitHub repository](https://github.com/sbfnk/EpiNow2.jl).

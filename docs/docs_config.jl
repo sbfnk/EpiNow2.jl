@@ -105,7 +105,12 @@ const ORG_BRANDING = false
 
 # Regexes for URLs to skip during the (full-build) linkcheck, e.g. a page
 # published by a separate workflow that is not yet live.
-const LINKCHECK_IGNORE = Regex[]
+# Pages on the deployed docs site and files on `main` are missing until the
+# branch adding them has merged and deployed, and a pull request links to them.
+const LINKCHECK_IGNORE = Regex[
+    r"^https://sbfnk\.github\.io/EpiNow2\.jl/",
+    r"^https://github\.com/sbfnk/EpiNow2\.jl/blob/main/",
+]
 
 # README -> index.md link rewrites: `from => to` pairs applied line by line,
 # e.g. rewriting an absolute docs URL to an in-site `@ref`.
