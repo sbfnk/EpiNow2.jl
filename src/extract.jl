@@ -228,6 +228,9 @@ function get_predictions(
     end
 end
 
+get_predictions(result::EpinowResult; kwargs...) =
+    get_predictions(result.estimates; kwargs...)
+
 function _format_sample_predictions(samples::DataFrame, result)
     forecast_date = result.observations.date[end]
     return DataFrame(

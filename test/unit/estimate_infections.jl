@@ -285,6 +285,7 @@ end
     @test result isa EpiNow2.EpinowResult
     @test result.estimates isa EpiNow2.EstimateInfectionsResult
     @test nrow(result.estimates.rt) > 60  # obs + forecast
+    @test get_predictions(result) == get_predictions(result.estimates)
 end
 
 @testitem "result has args field (v1.8 epinowfit parity)" setup = [TestSetup] begin
