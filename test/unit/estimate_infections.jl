@@ -402,3 +402,15 @@ end
     @test assembled.model.args.trunc_fixed_pmf ≈ fixed.pmf
     @test assembled.model() isa NamedTuple
 end
+
+@testitem "truncation leaves forecast reports alone" setup = [TestSetup] begin
+    assembled = EpiNow2.assemble_model(
+        EpiNow2.EpiData(_test_data());
+        generation_time = gt_opts(LogNormal(1.6, 0.5)),
+        delays = delay_opts(Dirac(0.0)),
+        truncation = trunc_opts(LogNormal(0.5, 0.3)), rt = rt_opts(),
+        backcalc = EpiNow2.backcalc_opts(), gp = gp_opts(),
+        obs = obs_opts(), forecast = forecast_opts(horizon = 7)
+    )
+    @test assembled.model() isa NamedTuple
+end

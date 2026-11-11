@@ -616,10 +616,12 @@ Generative process:
     end
 
     if !isnothing(trunc_rev_cmf)
+        # Only observed days are truncated; forecasts are left as they are,
+        # as in R.
         trunc_max = length(trunc_rev_cmf)
         expected_reports = [
             let days_from_end = n_times - t
-                if days_from_end < trunc_max
+                if 0 <= days_from_end < trunc_max
                     expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
                 else
                     expected_reports[t]
