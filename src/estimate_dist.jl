@@ -312,7 +312,7 @@ function estimate_dist(
         Turing.sample(
             rng, model, sampler,
             MCMCThreads(),
-            inference.samples + inference.warmup,
+            _samples_per_chain(inference),
             inference.chains;
             num_warmup = inference.warmup,
             progress = inference.progress,
@@ -321,7 +321,7 @@ function estimate_dist(
     else
         Turing.sample(
             rng, model, sampler,
-            inference.samples + inference.warmup;
+            _samples_per_chain(inference);
             num_warmup = inference.warmup,
             progress = inference.progress,
             verbose = false,
