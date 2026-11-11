@@ -104,4 +104,12 @@ end
 
     # A truncation longer than the data keeps every row.
     @test size(first(EpiNow2._truncation_obs(snapshots, 40)), 1) == 30
+
+    # Rolling windows: R first drops dates before the latest start, here
+    # 11 January, so with a long truncation 20 rows remain.
+    rolling = [
+        DataFrame(date = collect(dates[(n - 19):n]), confirm = fill(10, 20))
+            for n in (20, 25, 30)
+    ]
+    @test size(first(EpiNow2._truncation_obs(rolling, 40)), 1) == 20
 end

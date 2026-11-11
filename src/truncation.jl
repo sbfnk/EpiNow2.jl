@@ -145,23 +145,25 @@ end
 
 # Snapshots aligned on a shared daily axis, one column each (zero where a
 # snapshot has no data), and how many days each snapshot ends before the
-# latest. As R's `prepare_truncation_obs()`, rows from before the window
-# the truncation can affect are dropped: only the last `max_trunc` days of
-# the earliest-ending snapshot, and the days after it, are kept.
+# latest. As R's `prepare_truncation_obs()`, the axis starts on the latest
+# snapshot start date, and rows from before the window the truncation can
+# affect are dropped: only the last `max_trunc` days of the earliest-ending
+# snapshot, and the days after it, are kept.
 function _truncation_obs(sorted_snaps, max_trunc::Int)
-    common_start = minimum(s.date[1] for s in sorted_snaps)
+    common_start = maximum(s.date[1] for s in sorted_snaps)
     latest_end = maximum(s.date[end] for s in sorted_snaps)
     n_times = Dates.value(latest_end - common_start) + 1
 
     obs_matrix = zeros(Float64, n_times, length(sorted_snaps))
     for (i, s) in enumerate(sorted_snaps)
         for (d, c) in zip(s.date, s.confirm)
+            d >= common_start || continue
             obs_matrix[Dates.value(d - common_start) + 1, i] = Float64(c)
         end
     end
     obs_dist = [Dates.value(latest_end - s.date[end]) for s in sorted_snaps]
 
-    n_missing_first = n_times - nrow(sorted_snaps[1])
+    n_missing_first = n_times - count(>=(common_start), sorted_snaps[1].date)
     obs_start = max(n_times - max_trunc - n_missing_first + 1, 1)
     return obs_matrix[obs_start:end, :], obs_dist
 end
