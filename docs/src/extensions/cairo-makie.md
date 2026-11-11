@@ -4,16 +4,11 @@
 
 ## Scope
 
-Describe what this extension adds, and what a reader needs to load to get it.
+Loading CairoMakie (`using EpiNow2, CairoMakie`) adds plotting for delay distributions and fitted models:
 
-## Public API
+- `plot` on a distribution draws its discretised probability mass function. For an `UncertainDistribution` or a `CompositeDelay` with uncertain parts, it draws PMFs sampled from the parameter priors.
+- `plot` on a fit from [`estimate_infections`](@ref) or [`epinow`](@ref) draws infections, reported cases and Rt in one figure, with estimates and forecasts separated at the forecast date.
+- [`report_plots`](@ref) returns one figure per quantity (infections, reported cases, Rt and growth rate).
+- [`plot_summary`](@ref) draws Rt and reported cases side by side.
 
-Add CairoMakie to `docs/Project.toml` and the extension module to
-`EXTRA_MODULES` in `docs/docs_config.jl`, then replace this block with the
-one inside it, and the extension's docstrings render here.
-
-````markdown
-```@autodocs
-Modules = [Base.get_extension(EpiNow2, :EpiNow2CairoMakieExt)]
-```
-````
+The extension defines no names of its own: `report_plots` and `plot_summary` are documented with the rest of the API.
