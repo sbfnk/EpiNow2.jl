@@ -102,8 +102,8 @@ function estimate_truncation(
     length(data) >= 2 || throw(ArgumentError("Need at least 2 snapshots"))
 
     # Sort snapshots by end date so the most complete one is last (the
-    # reconstruction reference), and align all snapshots on a shared time axis
-    # starting at the earliest observed date.
+    # reconstruction reference); `_truncation_obs` then aligns them on a
+    # shared time axis starting at the latest snapshot start date.
     sorted_snaps = sort([sort(df, :date) for df in data]; by = s -> s.date[end])
     epi_datas = [EpiData(df) for df in sorted_snaps]
 
