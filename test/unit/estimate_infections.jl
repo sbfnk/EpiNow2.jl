@@ -17,7 +17,8 @@
             samples = 100,
             warmup = 100,
             chains = 1,
-            progress = false
+            progress = false,
+            max_treedepth = 8
         ),
         verbose = false
     )
@@ -69,7 +70,8 @@ end
             samples = 50,
             warmup = 50,
             chains = 1,
-            progress = false
+            progress = false,
+            max_treedepth = 8
         ),
         verbose = false
     )
@@ -98,7 +100,8 @@ end
             samples = 100,
             warmup = 100,
             chains = 1,
-            progress = false
+            progress = false,
+            max_treedepth = 8
         ),
         verbose = false
     )
@@ -133,7 +136,8 @@ end
             samples = 50,
             warmup = 50,
             chains = 1,
-            progress = false
+            progress = false,
+            max_treedepth = 8
         ),
         verbose = false
     )
@@ -247,7 +251,8 @@ end
         obs = obs_opts(week_effect = false),
         forecast = forecast_opts(horizon = 7),
         inference = inference_opts(
-            samples = 100, warmup = 100, chains = 1, progress = false
+            samples = 100, warmup = 100, chains = 1, progress = false,
+            max_treedepth = 8
         ),
         verbose = false
     )
@@ -271,7 +276,8 @@ end
         obs = obs_opts(week_effect = false),
         forecast = forecast_opts(horizon = 0),
         inference = inference_opts(
-            samples = 20, warmup = 20, chains = 1, progress = false
+            samples = 20, warmup = 20, chains = 1, progress = false,
+            max_treedepth = 8
         ),
         verbose = false,
     )
