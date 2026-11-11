@@ -449,8 +449,8 @@ Time-varying reproduction number options.
   `latest` (default), `project` or `estimate`.
 - `fixed_from`: when `future = estimate`, the number of days before the end
   of the data from which Rt is held fixed. `nothing` (default) uses the
-  seeding time (the longer of the generation time and delay distributions),
-  as R does. Ignored for `latest` and `project`.
+  seeding time, as R does: the rounded sum of the delay means, but at least
+  the maximum generation time. Ignored for `latest` and `project`.
 - `gp_on`: what the Gaussian process is applied to, a [`GPTarget`](@ref):
   `gp_Rt` (default) or `gp_R0`.
 - `pop`: initial susceptible population size, as a number or a prior
