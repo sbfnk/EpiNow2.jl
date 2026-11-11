@@ -382,3 +382,23 @@ end
     latest_fit = assemble(rt_opts(rw = 7, future = EpiNow2.latest))
     @test held_from(latest_fit.model.args.bps) > n_obs - 7
 end
+
+@testitem "composite truncation keeps its uncertain part" setup = [TestSetup] begin
+    uncertain = UncertainDistribution(
+        (μ, σ) -> LogNormal(μ, σ),
+        [Normal(0.5, 0.2), truncated(Normal(0.3, 0.1); lower = 0.01)],
+        5.0
+    )
+    fixed = discretise(LogNormal(0.2, 0.3); max = 3)
+    assembled = EpiNow2.assemble_model(
+        EpiNow2.EpiData(_test_data());
+        generation_time = gt_opts(LogNormal(1.6, 0.5)),
+        delays = delay_opts(Dirac(0.0)),
+        truncation = trunc_opts(uncertain + fixed), rt = rt_opts(),
+        backcalc = EpiNow2.backcalc_opts(), gp = gp_opts(),
+        obs = obs_opts(), forecast = forecast_opts(horizon = 0)
+    )
+    @test assembled.model.args.trunc_uncertain === uncertain
+    @test assembled.model.args.trunc_fixed_pmf ≈ fixed.pmf
+    @test assembled.model() isa NamedTuple
+end

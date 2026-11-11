@@ -361,6 +361,7 @@ Generative process:
         # Fixed components convolved with the sampled uncertain ones
         gt_fixed_pmf::AbstractVector{Float64},
         delay_fixed_pmf::AbstractVector{Float64},
+        trunc_fixed_pmf::AbstractVector{Float64},
         # Prior weights: the number of observed time points when
         # `weight_prior` is set, as in R, otherwise 1
         gt_prior_weight::Float64,
@@ -608,8 +609,9 @@ Generative process:
             Turing.@addlogprob! (trunc_prior_weight - 1) *
                 _prior_logpdf(trunc_uncertain, trunc_params)
         end
-        trunc_dist = trunc_uncertain.constructor(trunc_params...)
-        trunc_pmf = discretise_ad(trunc_dist, Int(trunc_uncertain.max))
+        trunc_pmf = _uncertain_pmf(
+            [trunc_uncertain], [trunc_params], trunc_fixed_pmf
+        )
         trunc_rev_cmf = reverse(cumsum(trunc_pmf))
     end
 
@@ -948,9 +950,15 @@ function assemble_model(
         delay_uncertain, _prior_means.(delay_uncertain), delay_fixed_pmf
     )
 
-    # Truncation: fixed, uncertain, or none
-    trunc_uncertain = truncation.dist isa UncertainDistribution ?
-        truncation.dist : nothing
+    # Truncation: fixed, uncertain, or none. Uncertain parts are sampled in
+    # the model and convolved with the fixed parts, as for the delays.
+    trunc_uncertain_parts = _extract_uncertain(truncation.dist)
+    length(trunc_uncertain_parts) <= 1 || throw(
+        ArgumentError("Only one uncertain truncation distribution is supported")
+    )
+    trunc_uncertain = isempty(trunc_uncertain_parts) ? nothing :
+        only(trunc_uncertain_parts)
+    trunc_fixed_pmf = _fixed_pmf(truncation.dist)
     trunc_rev_cmf = if trunc_uncertain !== nothing
         nothing  # model will compute from sampled params
     elseif truncation.dist isa Dirac && truncation.dist.value == 0.0
@@ -1098,6 +1106,7 @@ function assemble_model(
         backcalc.prior,
         gt_fixed_pmf,
         delay_fixed_pmf,
+        trunc_fixed_pmf,
         generation_time.weight_prior ? Float64(n_times) : 1.0,
         delays.weight_prior ? Float64(n_times) : 1.0,
         truncation.weight_prior ? Float64(n_times) : 1.0
