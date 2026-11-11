@@ -414,3 +414,19 @@ end
     )
     @test assembled.model() isa NamedTuple
 end
+
+@testitem "seeding time follows R's get_seeding_time" setup = [TestSetup] begin
+    seeding(delay) = EpiNow2.assemble_model(
+        EpiNow2.EpiData(_test_data());
+        generation_time = gt_opts(discretise(LogNormal(1.6, 0.5); max = 10)),
+        delays = delay_opts(delay), truncation = trunc_opts(),
+        rt = rt_opts(), backcalc = EpiNow2.backcalc_opts(), gp = gp_opts(),
+        obs = obs_opts(), forecast = forecast_opts()
+    ).metadata.seeding_time
+    # max(round(sum of delay means), maximum generation time, 1)
+    @test seeding(Dirac(0.0)) == 10
+    @test seeding(LogNormal(1.6, 0.5)) == 10
+    @test seeding(LogNormal(2.5, 0.5)) == round(Int, exp(2.5 + 0.5^2 / 2))
+    @test seeding(LogNormal(1.6, 0.5) + LogNormal(1.6, 0.5)) ==
+        round(Int, 2 * exp(1.6 + 0.5^2 / 2))
+end

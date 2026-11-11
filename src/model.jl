@@ -970,9 +970,12 @@ function assemble_model(
         reverse(cumsum(trunc_pmf))
     end
 
-    # Seeding time: max of generation time and total delay, at least 1
-    # Matches R: max(sum of delay means, max generation time)
-    seeding_time = max(length(gt_pmf) - 1, length(delay_pmf) - 1, 1)
+    # Seeding time as R's `get_seeding_time()`: the rounded sum of the delay
+    # means, but at least the maximum generation time (the length of
+    # `gt_pmf`, which starts at a delay of 1) and at least 1.
+    seeding_time = max(
+        round(Int, _delay_mean(delays.dist)), length(gt_pmf), 1
+    )
 
     # GP configuration
     # `gp = nothing` switches the Gaussian process off; a random walk on
@@ -1273,6 +1276,14 @@ function _uncertain_pmf(uncertain, θs, fixed_pmf)
     end
     return pmf
 end
+
+# Mean of a delay ignoring parameter uncertainty, as R's
+# `mean(delays, ignore_uncertainty = TRUE)`: uncertain parts at their prior
+# mean parameters, composites as the sum of their parts.
+_delay_mean(d::Distribution) = mean(d)
+_delay_mean(d::NonParametricDist) = sum((0:(length(d.pmf) - 1)) .* d.pmf)
+_delay_mean(d::UncertainDistribution) = mean(d.constructor(_prior_means(d)...))
+_delay_mean(d::CompositeDelay) = sum(_delay_mean, d.components)
 
 """Extract UncertainDistribution components from any delay specification."""
 function _extract_uncertain(d::UncertainDistribution)
