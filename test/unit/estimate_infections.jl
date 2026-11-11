@@ -429,6 +429,16 @@ end
     @test seeding(LogNormal(2.5, 0.5)) == round(Int, exp(2.5 + 0.5^2 / 2))
     @test seeding(LogNormal(1.6, 0.5) + LogNormal(1.6, 0.5)) ==
         round(Int, 2 * exp(1.6 + 0.5^2 / 2))
+    # A truncated parameter prior counts at the untruncated location, as R
+    # applies the bound separately: here sdlog = 1, giving a mean of 4.48
+    # where the truncated prior's mean (sdlog 1.29) would give 6.23.
+    uncertain = UncertainDistribution(
+        (μ, σ) -> LogNormal(μ, σ),
+        [Normal(1.0, 0.5), truncated(Normal(1.0, 1.0); lower = 0.0)],
+        30.0
+    )
+    @test seeding(uncertain + LogNormal(2.0, 0.5)) ==
+        round(Int, exp(1.5) + exp(2.0 + 0.5^2 / 2))
 end
 
 @testitem "forecast depletion starts where Rt is held" setup = [TestSetup] begin

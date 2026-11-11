@@ -1284,11 +1284,17 @@ function _uncertain_pmf(uncertain, θs, fixed_pmf)
 end
 
 # Mean of a delay ignoring parameter uncertainty, as R's
-# `mean(delays, ignore_uncertainty = TRUE)`: uncertain parts at their prior
-# mean parameters, composites as the sum of their parts.
+# `mean(delays, ignore_uncertainty = TRUE)`: uncertain parts at the mean of
+# each parameter prior, composites as the sum of their parts. R applies
+# parameter bounds separately from the prior, so a truncated prior counts
+# with the mean of the distribution it truncates.
 _delay_mean(d::Distribution) = mean(d)
 _delay_mean(d::NonParametricDist) = sum((0:(length(d.pmf) - 1)) .* d.pmf)
-_delay_mean(d::UncertainDistribution) = mean(d.constructor(_prior_means(d)...))
+_delay_mean(d::UncertainDistribution) = mean(
+    d.constructor(
+        [p isa Truncated ? mean(p.untruncated) : mean(p) for p in d.param_priors]...
+    )
+)
 _delay_mean(d::CompositeDelay) = sum(_delay_mean, d.components)
 
 """Extract UncertainDistribution components from any delay specification."""
