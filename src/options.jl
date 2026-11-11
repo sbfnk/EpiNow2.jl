@@ -103,7 +103,7 @@ poisson
 How Rt is treated beyond the data, passed as `future` to [`rt_opts`](@ref).
 Values: [`latest`](@ref) (hold the last estimate, the default),
 [`project`](@ref) (continue the Gaussian process) and [`estimate`](@ref)
-(hold the estimate from `fixed_from` days before the end).
+(hold the estimate from a number of days before the end).
 """
 ForecastMode
 
@@ -137,8 +137,8 @@ project
     estimate
 
 Hold Rt fixed from `fixed_from` days before the end of the data onwards (a
-[`ForecastMode`](@ref) value). Useful when the most recent estimates are
-unreliable because of right truncation.
+[`ForecastMode`](@ref) value), by default the seeding time. Useful when the
+most recent estimates are unreliable because of right truncation.
 
 ```@example estimate
 using EpiNow2
@@ -421,7 +421,7 @@ Base.@kwdef struct RtOpts{P <: Union{Float64, Distribution}}
     use_rt::Bool = true
     rw::Int = 0
     future::ForecastMode = latest
-    fixed_from::Int = 0
+    fixed_from::Union{Int, Nothing} = nothing
     gp_on::GPTarget = gp_Rt
     pop::P = 0.0
     pop_period::PopPeriod = pop_forecast
@@ -429,7 +429,7 @@ Base.@kwdef struct RtOpts{P <: Union{Float64, Distribution}}
 end
 
 """
-    rt_opts(; prior, use_rt = true, rw = 0, future = latest, fixed_from = 0,
+    rt_opts(; prior, use_rt = true, rw = 0, future = latest, fixed_from = nothing,
             gp_on = gp_Rt, pop = 0.0, pop_period = pop_forecast,
             pop_floor = 1.0)
 
@@ -448,7 +448,9 @@ Time-varying reproduction number options.
 - `future`: how Rt is treated beyond the data, a [`ForecastMode`](@ref):
   `latest` (default), `project` or `estimate`.
 - `fixed_from`: when `future = estimate`, the number of days before the end
-  of the data from which Rt is held fixed (default 0).
+  of the data from which Rt is held fixed. `nothing` (default) uses the
+  seeding time (the longer of the generation time and delay distributions),
+  as R does. Ignored for `latest` and `project`.
 - `gp_on`: what the Gaussian process is applied to, a [`GPTarget`](@ref):
   `gp_Rt` (default) or `gp_R0`.
 - `pop`: initial susceptible population size, as a number or a prior

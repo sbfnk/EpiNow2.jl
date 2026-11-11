@@ -971,6 +971,11 @@ function assemble_model(
     gp = something(gp, gp_opts())
     stationary = rt.gp_on == gp_R0
     future_fixed = rt.future in (latest, estimate)
+    # Offset of the last estimated Rt from the end of the data, as `from` in
+    # R's `create_future_rt()`: 0 for `latest`, minus the hold-back for
+    # `estimate`.
+    fixed_offset = rt.future == estimate ?
+        -something(rt.fixed_from, seeding_time) : 0
     # Number of GP noise terms (matches Stan's setup_noise)
     noise_terms = if !use_gp
         0
@@ -979,7 +984,7 @@ function assemble_model(
         total_times
     else
         nt = stationary ? total_times : total_times - 1
-        future_fixed ? nt - n_forecast + rt.fixed_from : nt
+        future_fixed ? nt - n_forecast + fixed_offset : nt
     end
     gp_boundary, gp_n_basis = use_gp ? gp_basis_settings(gp, noise_terms) :
         (1.5, 0)
@@ -1027,7 +1032,7 @@ function assemble_model(
     bps = if rt.use_rt && rt.rw > 0
         steps = [div(t, rt.rw) for t in 1:total_times]
         if rt.future != project
-            max_bps = total_times - n_forecast + rt.fixed_from
+            max_bps = total_times - n_forecast + fixed_offset
             if max_bps < total_times
                 steps[(max_bps + 1):end] .= steps[max_bps]
             end
