@@ -15,7 +15,10 @@
         )
     end
 
+    # A short warmup can leave NUTS with a tiny step size; the depth cap stops
+    # one such fit from running for hours on the slower CI legs.
     _fast_inference() = inference_opts(
-        samples = 50, warmup = 50, chains = 1, seed = 42, progress = false
+        samples = 50, warmup = 50, chains = 1, seed = 42, progress = false,
+        max_treedepth = 8
     )
 end
