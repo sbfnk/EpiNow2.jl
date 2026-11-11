@@ -446,3 +446,20 @@ end
         length(data) - held.metadata.seeding_time
     @test assemble(EpiNow2.latest).model.args.pop_start == length(data)
 end
+
+@testitem "returned reports are not truncated" setup = [TestSetup] begin
+    assemble(truncation) = EpiNow2.assemble_model(
+        EpiNow2.EpiData(_test_data());
+        generation_time = gt_opts(LogNormal(1.6, 0.5)),
+        delays = delay_opts(Dirac(0.0)), truncation = truncation,
+        rt = rt_opts(), backcalc = EpiNow2.backcalc_opts(), gp = gp_opts(),
+        obs = obs_opts(), forecast = forecast_opts(horizon = 7)
+    ).model
+    # A fixed truncation adds no parameters, so the same seed draws the same
+    # parameters for both models; only the likelihood should differ.
+    Random.seed!(1)
+    plain = assemble(trunc_opts())()
+    Random.seed!(1)
+    truncated_fit = assemble(trunc_opts(LogNormal(0.5, 0.3)))()
+    @test truncated_fit.reports ≈ plain.reports
+end

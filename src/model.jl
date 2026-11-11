@@ -616,11 +616,12 @@ Generative process:
         trunc_rev_cmf = reverse(cumsum(trunc_pmf))
     end
 
+    # As in R, truncation only enters the likelihood: the reports returned
+    # stay untruncated, and only observed days are truncated.
+    obs_reports = expected_reports
     if !isnothing(trunc_rev_cmf)
-        # Only observed days are truncated; forecasts are left as they are,
-        # as in R.
         trunc_max = length(trunc_rev_cmf)
-        expected_reports = [
+        obs_reports = [
             let days_from_end = n_times - t
                 if 0 <= days_from_end < trunc_max
                     expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
@@ -643,6 +644,7 @@ Generative process:
         expected_reports = _apply_accumulation(
             expected_reports, accum_full, total_times
         )
+        obs_reports = _apply_accumulation(obs_reports, accum_full, total_times)
     end
 
     # ── Likelihood ───────────────────────────────────────────────────
@@ -652,12 +654,12 @@ Generative process:
         )
         φ = 1.0 / reporting_overdispersion^2
         for t in 1:n_times
-            μ = max(expected_reports[t], 1.0e-6)
+            μ = max(obs_reports[t], 1.0e-6)
             Turing.@addlogprob! obs_weight * _negbin2_logpmf(cases[t], μ, φ)
         end
     else  # poisson
         for t in 1:n_times
-            μ = max(expected_reports[t], 1.0e-6)
+            μ = max(obs_reports[t], 1.0e-6)
             Turing.@addlogprob! obs_weight * logpdf(Poisson(μ), cases[t])
         end
     end
