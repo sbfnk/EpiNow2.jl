@@ -311,8 +311,8 @@ function run_validation()
             println("Running Julia estimate_truncation...")
             tres = run_julia_truncation(snapshots)
             gqs = tres.fit.generated_quantities
-            jl_meanlog = mean(g.trunc_meanlog for g in gqs)
-            jl_sdlog = mean(g.trunc_sdlog for g in gqs)
+            jl_meanlog = mean(g.trunc_params[1] for g in gqs)
+            jl_sdlog = mean(g.trunc_params[2] for g in gqs)
 
             ml_err = abs(jl_meanlog - r_meanlog) / abs(r_meanlog)
             sl_err = abs(jl_sdlog - r_sdlog) / abs(r_sdlog)
