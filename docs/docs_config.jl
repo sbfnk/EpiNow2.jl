@@ -31,7 +31,10 @@ const TUTORIAL_STUBS = Pair{String, String}[]
 # empty; every heavy tutorial without such a problem should execute. Shared
 # with the `docs/src/benchmarks/` pipeline below, so `ad-comparison.jl` is
 # parked by naming it here too.
-const FORCE_STUB_TUTORIALS = String[]
+# The AD-comparison page needs DifferentiationInterfaceTest, whose releases
+# cap JET below the versions current Julia needs, so it cannot be installed
+# alongside the docs environment.
+const FORCE_STUB_TUTORIALS = String["ad-comparison.jl"]
 
 # Heavy tutorials that build against their own environment instead of the
 # shared `docs/` one, as `"file.jl" => "environment/dir"` pairs. The directory
