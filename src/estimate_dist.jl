@@ -285,6 +285,7 @@ function estimate_dist(
             num_warmup = inference.warmup,
             progress = inference.progress,
             verbose = false,
+            chain_type = MCMCChains.Chains,
         )
     else
         Turing.sample(
@@ -293,6 +294,7 @@ function estimate_dist(
             num_warmup = inference.warmup,
             progress = inference.progress,
             verbose = false,
+            chain_type = MCMCChains.Chains,
         )
     end
     elapsed = time() - t0

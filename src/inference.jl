@@ -55,12 +55,14 @@ function _sample(model, opts::InferenceOpts)
             opts.samples, opts.chains;
             num_warmup=opts.warmup,
             progress=opts.progress,
+            chain_type=MCMCChains.Chains,
         )
     else
         Turing.sample(
             model, sampler, opts.samples;
             num_warmup=opts.warmup,
             progress=opts.progress,
+            chain_type=MCMCChains.Chains,
         )
     end
 end
