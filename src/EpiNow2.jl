@@ -42,7 +42,7 @@ export AutoForwardDiff, AutoReverseDiff, AutoMooncake
 
 # ── Distribution system ────────────────────────────────────────────────
 export NonParametricDist, UncertainDistribution, DelayDistribution,
-       CompositeDelay
+    CompositeDelay
 export discretise, convolve_pmfs
 
 # ── Enums ──────────────────────────────────────────────────────────────
@@ -57,26 +57,26 @@ export SecondaryType, incidence, prevalence
 
 # ── Options ─────────────────────────────────────────────────────────────
 export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
-       backcalc_opts, forecast_opts, inference_opts, secondary_opts
+    backcalc_opts, forecast_opts, inference_opts, secondary_opts
 
 # ── Main inference functions ────────────────────────────────────────────
 export epinow, estimate_infections, estimate_secondary,
-       estimate_truncation, regional_epinow, example_confirmed,
-       simulate_secondary, forecast_secondary,
-       example_generation_time, example_incubation_period,
-       example_reporting_delay
+    estimate_truncation, regional_epinow, example_confirmed,
+    simulate_secondary, forecast_secondary,
+    example_generation_time, example_incubation_period,
+    example_reporting_delay
 
 # ── Accessors ───────────────────────────────────────────────────────────
 export get_samples, get_predictions, get_parameters, get_imputed_reports
 
 # ── Utilities ──────────────────────────────────────────────────────────
 export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
-       simulate_infections, forecast_infections, opts_list,
-       estimate_dist, bootstrapped_dist_fit,
-       get_regional_results,
-       convert_to_logmean, convert_to_logsd,
-       add_breakpoints, filter_leading_zeros, fill_missing,
-       calc_CrI, calc_CrIs, calc_summary_stats, calc_summary_measures
+    simulate_infections, forecast_infections, opts_list,
+    estimate_dist, bootstrapped_dist_fit,
+    get_regional_results,
+    convert_to_logmean, convert_to_logsd,
+    add_breakpoints, filter_leading_zeros, fill_missing,
+    calc_CrI, calc_CrIs, calc_summary_stats, calc_summary_measures
 
 include("distributions.jl")
 include("options.jl")

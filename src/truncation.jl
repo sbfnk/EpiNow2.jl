@@ -53,18 +53,18 @@ result = epinow(data, truncation=trunc_opts(trunc.dist), ...)
 ```
 """
 function estimate_truncation(
-    data::Vector{DataFrame};
-    truncation::TruncOpts = trunc_opts(LogNormal(0.0, 1.0)),
-    inference::InferenceOpts = inference_opts(),
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
-    verbose::Bool = true
-)
+        data::Vector{DataFrame};
+        truncation::TruncOpts = trunc_opts(LogNormal(0.0, 1.0)),
+        inference::InferenceOpts = inference_opts(),
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        verbose::Bool = true
+    )
     length(data) >= 2 || throw(ArgumentError("Need at least 2 snapshots"))
 
     # Sort snapshots by end date so the most complete one is last (the
     # reconstruction reference), and align all snapshots on a shared time axis
     # starting at the earliest observed date.
-    sorted_snaps = sort([sort(df, :date) for df in data]; by=s -> s.date[end])
+    sorted_snaps = sort([sort(df, :date) for df in data]; by = s -> s.date[end])
     epi_datas = [EpiData(df) for df in sorted_snaps]
 
     common_start = minimum(s.date[1] for s in sorted_snaps)
@@ -87,7 +87,7 @@ function estimate_truncation(
         15
     end
 
-    verbose && @info "Estimating truncation..." n_snapshots=length(data) max_trunc
+    verbose && @info "Estimating truncation..." n_snapshots = length(data) max_trunc
 
     model = truncation_model(
         obs, obs_dist, max_trunc,
@@ -103,17 +103,17 @@ function estimate_truncation(
     fit = run_inference(model, metadata, inference)
     elapsed = time() - t0
 
-    verbose && @info "Truncation estimation complete" seconds=round(elapsed, digits=1)
+    verbose && @info "Truncation estimation complete" seconds = round(elapsed, digits = 1)
 
     fitted_dist = _extract_truncation_dist(fit)
 
     args = EstimateTruncationArgs(truncation, inference, CrIs)
-    EstimateTruncationResult(fit, args, fitted_dist, epi_datas, elapsed)
+    return EstimateTruncationResult(fit, args, fitted_dist, epi_datas, elapsed)
 end
 
 function _extract_truncation_dist(fit::EpiNow2Fit)
     gqs = fit.generated_quantities
     meanlog_samples = [gq.trunc_meanlog for gq in gqs]
     sdlog_samples = [gq.trunc_sdlog for gq in gqs]
-    LogNormal(mean(meanlog_samples), mean(sdlog_samples))
+    return LogNormal(mean(meanlog_samples), mean(sdlog_samples))
 end

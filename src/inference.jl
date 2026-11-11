@@ -11,7 +11,7 @@ Run Bayesian inference on the assembled Turing model.
 function run_inference(model, metadata, opts::InferenceOpts)
     chain = _sample(model, opts)
     gq_vec = _extract_generated_quantities(model, chain)
-    EpiNow2Fit(chain, gq_vec, metadata)
+    return EpiNow2Fit(chain, gq_vec, metadata)
 end
 
 """
@@ -49,18 +49,18 @@ function _sample(model, opts::InferenceOpts)
     # and the returned chain is contaminated with un-adapted samples,
     # producing a flat posterior median Rt.
 
-    if opts.chains > 1
+    return if opts.chains > 1
         Turing.sample(
             model, sampler, MCMCThreads(),
             opts.samples, opts.chains;
-            num_warmup=opts.warmup,
-            progress=opts.progress,
+            num_warmup = opts.warmup,
+            progress = opts.progress,
         )
     else
         Turing.sample(
             model, sampler, opts.samples;
-            num_warmup=opts.warmup,
-            progress=opts.progress,
+            num_warmup = opts.warmup,
+            progress = opts.progress,
         )
     end
 end
@@ -81,11 +81,10 @@ end
 # ── Sampler construction ─────────────────────────────────────────────────
 
 function _make_sampler(opts::InferenceOpts)
-    Turing.NUTS(
+    return Turing.NUTS(
         opts.warmup,
         opts.target_acceptance;
-        max_depth=opts.max_treedepth,
-        adtype=opts.adtype
+        max_depth = opts.max_treedepth,
+        adtype = opts.adtype
     )
 end
-

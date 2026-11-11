@@ -44,9 +44,11 @@ function add_breakpoints(data::DataFrame; dates::AbstractVector{Date} = Date[])
     if !isempty(dates)
         missing_dates = setdiff(dates, out.date)
         isempty(missing_dates) ||
-            throw(ArgumentError(
+            throw(
+            ArgumentError(
                 "Breakpoint date(s) not found in data: $(missing_dates)"
-            ))
+            )
+        )
         for d in dates
             out.breakpoints[out.date .== d] .= 1
         end
@@ -87,28 +89,34 @@ fill_missing(
 ```
 """
 function fill_missing(
-    data::DataFrame;
-    missing_dates::Symbol = :ignore,
-    missing_obs::Symbol = :ignore,
-    initial_accumulate::Union{Int, Nothing} = nothing,
-    obs_column::Symbol = :confirm,
-)
+        data::DataFrame;
+        missing_dates::Symbol = :ignore,
+        missing_obs::Symbol = :ignore,
+        initial_accumulate::Union{Int, Nothing} = nothing,
+        obs_column::Symbol = :confirm,
+    )
     :date in propertynames(data) ||
         throw(ArgumentError("`data` must have a `:date` column"))
     obs_column in propertynames(data) ||
         throw(ArgumentError("`data` must have a `:$obs_column` column"))
     :accumulate in propertynames(data) &&
-        throw(ArgumentError(
+        throw(
+        ArgumentError(
             "`data` already has an `accumulate` column"
-        ))
+        )
+    )
     missing_dates in (:ignore, :accumulate, :zero) ||
-        throw(ArgumentError(
+        throw(
+        ArgumentError(
             "`missing_dates` must be :ignore, :accumulate, or :zero"
-        ))
+        )
+    )
     missing_obs in (:ignore, :accumulate, :zero) ||
-        throw(ArgumentError(
+        throw(
+        ArgumentError(
             "`missing_obs` must be :ignore, :accumulate, or :zero"
-        ))
+        )
+    )
 
     sorted = sort(data, :date)
 
@@ -125,7 +133,7 @@ function fill_missing(
         throw(ArgumentError("`initial_accumulate` must be ≥ 1"))
 
     start = sorted.date[1] - Day(init_n - 1)
-    stop  = sorted.date[end]
+    stop = sorted.date[end]
     full_dates = collect(start:Day(1):stop)
 
     present = Set(sorted.date)
@@ -182,16 +190,18 @@ Drop rows from the start of `data` until the first day on which
 (without the `by =` group argument; add it when needed).
 """
 function filter_leading_zeros(
-    data::DataFrame;
-    obs_column::Symbol = :confirm,
-)
+        data::DataFrame;
+        obs_column::Symbol = :confirm,
+    )
     :date in propertynames(data) ||
         throw(ArgumentError("`data` must have a `:date` column"))
     obs_column in propertynames(data) ||
         throw(ArgumentError("`data` must have a `:$obs_column` column"))
     sorted = sort(data, :date)
-    first_pos = findfirst(x -> !ismissing(x) && x > 0,
-                          sorted[!, obs_column])
+    first_pos = findfirst(
+        x -> !ismissing(x) && x > 0,
+        sorted[!, obs_column]
+    )
     isnothing(first_pos) && return DataFrame(sorted[1:0, :])
     return DataFrame(sorted[first_pos:end, :])
 end
@@ -209,7 +219,7 @@ Returns a descriptive string matching R's `map_prob_change()`.
 - `prob_decrease ≤ 1.0` → "Decreasing"
 """
 function map_prob_change(prob_decrease::Float64)
-    if prob_decrease < 0.05
+    return if prob_decrease < 0.05
         "Increasing"
     elseif prob_decrease < 0.4
         "Likely increasing"
@@ -227,12 +237,12 @@ end
 
 Compute the posterior probability that Rt < 1 at a given date (default: latest).
 """
-function prob_decrease(result::EstimateInfectionsResult; date=nothing)
-    samples = get_samples(result; variable=:R)
+function prob_decrease(result::EstimateInfectionsResult; date = nothing)
+    samples = get_samples(result; variable = :R)
     target_date = isnothing(date) ? result.observations.date[end] : date
     rt_samples = filter(r -> r.date == target_date, samples)
     isempty(rt_samples) && return NaN
-    mean(rt_samples.value .< 1.0)
+    return mean(rt_samples.value .< 1.0)
 end
 
 prob_decrease(result::EpinowResult; kwargs...) =
@@ -258,14 +268,14 @@ observations from the observation model.
 A `DataFrame` with `:date`, `:infections`, `:reports` columns.
 """
 function simulate_infections(
-    R_trajectory::DataFrame;
-    generation_time::GTOpts = gt_opts(LogNormal(1.6, 0.5)),
-    delays::DelayOpts = delay_opts(),
-    obs::ObsOpts = obs_opts(family=poisson),
-    initial_infections::Float64 = 100.0,
-    pop::Float64 = 0.0,
-    seed::Union{Int, Nothing} = nothing
-)
+        R_trajectory::DataFrame;
+        generation_time::GTOpts = gt_opts(LogNormal(1.6, 0.5)),
+        delays::DelayOpts = delay_opts(),
+        obs::ObsOpts = obs_opts(family = poisson),
+        initial_infections::Float64 = 100.0,
+        pop::Float64 = 0.0,
+        seed::Union{Int, Nothing} = nothing
+    )
     !isnothing(seed) && Random.seed!(seed)
 
     sorted = sort(R_trajectory, :date)
@@ -280,8 +290,10 @@ function simulate_infections(
     # Seeding
     seeding_time = max(gt_len - 1, 1)
     growth = R_to_growth(R_vals[1], gt_pmf)
-    initial = [initial_infections * exp(growth * (s - seeding_time))
-               for s in 1:seeding_time]
+    initial = [
+        initial_infections * exp(growth * (s - seeding_time))
+            for s in 1:seeding_time
+    ]
 
     # Renewal equation
     infections = Vector{Float64}(undef, seeding_time + n)
@@ -292,7 +304,7 @@ function simulate_infections(
         t = seeding_time + s
         infectiousness = sum(
             infections[t - j] * gt_pmf[j]
-            for j in 1:min(t - 1, gt_len)
+                for j in 1:min(t - 1, gt_len)
         )
         if pop > 0
             susceptible = max(1.0, pop - cum_inf)
@@ -312,13 +324,15 @@ function simulate_infections(
 
     # Sample observations
     reports = if obs.family == negbin
-        [max(0, rand(NegativeBinomial2(max(r, 1e-6), 5.0)))
-         for r in expected_reports]
+        [
+            max(0, rand(NegativeBinomial2(max(r, 1.0e-6), 5.0)))
+                for r in expected_reports
+        ]
     else
-        [max(0, rand(Poisson(max(r, 1e-6)))) for r in expected_reports]
+        [max(0, rand(Poisson(max(r, 1.0e-6)))) for r in expected_reports]
     end
 
-    DataFrame(date=dates, infections=post_seed, reports=reports)
+    return DataFrame(date = dates, infections = post_seed, reports = reports)
 end
 
 """
@@ -336,12 +350,12 @@ posterior sample's parameters.
 A `DataFrame` with summary statistics for forecasted reports.
 """
 function forecast_infections(
-    result::EstimateInfectionsResult,
-    R_trajectory::DataFrame;
-    generation_time::GTOpts = gt_opts(LogNormal(1.6, 0.5)),
-    delays::DelayOpts = delay_opts(),
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
-)
+        result::EstimateInfectionsResult,
+        R_trajectory::DataFrame;
+        generation_time::GTOpts = gt_opts(LogNormal(1.6, 0.5)),
+        delays::DelayOpts = delay_opts(),
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+    )
     sorted_R = sort(R_trajectory, :date)
     forecast_dates = Date.(sorted_R.date)
     R_vals = Float64.(sorted_R.R)
@@ -389,7 +403,7 @@ function forecast_infections(
         end
     end
 
-    _matrix_to_summary(mat, forecast_dates, CrIs)
+    return _matrix_to_summary(mat, forecast_dates, CrIs)
 end
 
 forecast_infections(result::EpinowResult, args...; kwargs...) =
@@ -405,11 +419,11 @@ function _extract_delays(data::DataFrame; max_delay::Int)
     end
     valid = filter(d -> d > 0 && d <= max_delay, delays)
     isempty(valid) && throw(ArgumentError("No valid delays found"))
-    valid
+    return valid
 end
 
 function _fit_family(family::Symbol, data::AbstractVector{Float64})
-    if family == :lognormal
+    return if family == :lognormal
         fit(LogNormal, data)
     elseif family == :gamma
         fit(Gamma, data)
@@ -427,11 +441,11 @@ Returns a DataFrame with the grouping columns plus `lower_X` and
 `upper_X`, where `X = round(100*CrI)`. Mirrors EpiNow2 R's `calc_CrI()`.
 """
 function calc_CrI(
-    samples::DataFrame;
-    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-    CrI::Float64 = 0.9,
-    value_col::Symbol = :value,
-)
+        samples::DataFrame;
+        by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        CrI::Float64 = 0.9,
+        value_col::Symbol = :value,
+    )
     half = CrI / 2
     lo, hi = 0.5 - half, 0.5 + half
     pct = round(Int, 100 * CrI)
@@ -439,12 +453,15 @@ function calc_CrI(
 
     if isnothing(by)
         return DataFrame(
-            (lo_col => quantile(samples[!, value_col], lo),
-             hi_col => quantile(samples[!, value_col], hi))...
+            (
+                lo_col => quantile(samples[!, value_col], lo),
+                hi_col => quantile(samples[!, value_col], hi),
+            )...
         )
     end
     by_vec = by isa Symbol ? [by] : by
-    combine(groupby(samples, by_vec),
+    return combine(
+        groupby(samples, by_vec),
         value_col => (v -> quantile(v, lo)) => lo_col,
         value_col => (v -> quantile(v, hi)) => hi_col,
     )
@@ -458,15 +475,15 @@ the grouping columns plus pairs of `lower_X` / `upper_X` columns for
 each CrI in `CrIs`. Mirrors EpiNow2 R's `calc_CrIs()`.
 """
 function calc_CrIs(
-    samples::DataFrame;
-    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
-    value_col::Symbol = :value,
-)
+        samples::DataFrame;
+        by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        value_col::Symbol = :value,
+    )
     sorted_CrIs = sort(CrIs)
     pieces = [
         calc_CrI(samples; by = by, CrI = cri, value_col = value_col)
-        for cri in sorted_CrIs
+            for cri in sorted_CrIs
     ]
     if isnothing(by)
         return hcat(pieces...)
@@ -476,7 +493,7 @@ function calc_CrIs(
     for p in pieces[2:end]
         out = innerjoin(out, p, on = by_vec)
     end
-    out
+    return out
 end
 
 """
@@ -486,19 +503,20 @@ Compute median, mean and standard deviation for a long-format `samples`
 DataFrame. Mirrors EpiNow2 R's `calc_summary_stats()`.
 """
 function calc_summary_stats(
-    samples::DataFrame;
-    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-    value_col::Symbol = :value,
-)
+        samples::DataFrame;
+        by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        value_col::Symbol = :value,
+    )
     if isnothing(by)
         v = samples[!, value_col]
         return DataFrame(median = median(v), mean = mean(v), sd = std(v))
     end
     by_vec = by isa Symbol ? [by] : by
-    combine(groupby(samples, by_vec),
+    return combine(
+        groupby(samples, by_vec),
         value_col => median => :median,
-        value_col => mean   => :mean,
-        value_col => std    => :sd,
+        value_col => mean => :mean,
+        value_col => std => :sd,
     )
 end
 
@@ -510,18 +528,18 @@ Join `calc_summary_stats()` and `calc_CrIs()` into a single summary
 DataFrame. Mirrors EpiNow2 R's `calc_summary_measures()`.
 """
 function calc_summary_measures(
-    samples::DataFrame;
-    by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
-    value_col::Symbol = :value,
-)
+        samples::DataFrame;
+        by::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        value_col::Symbol = :value,
+    )
     stats = calc_summary_stats(samples; by, value_col)
-    cris  = calc_CrIs(samples; by, CrIs, value_col)
+    cris = calc_CrIs(samples; by, CrIs, value_col)
     if isnothing(by)
         return hcat(stats, cris)
     end
     by_vec = by isa Symbol ? [by] : by
-    innerjoin(stats, cris; on = by_vec)
+    return innerjoin(stats, cris; on = by_vec)
 end
 
 """
@@ -541,11 +559,11 @@ An `UncertainDistribution` with Normal priors on parameters derived from
 the bootstrap mean and standard deviation.
 """
 function bootstrapped_dist_fit(
-    data::DataFrame;
-    family::Symbol = :lognormal,
-    max_delay::Int = 30,
-    n_bootstraps::Int = 100
-)
+        data::DataFrame;
+        family::Symbol = :lognormal,
+        max_delay::Int = 30,
+        n_bootstraps::Int = 100
+    )
     valid = _extract_delays(data; max_delay)
     n = length(valid)
 
@@ -568,11 +586,11 @@ function bootstrapped_dist_fit(
     end
 
     priors = Distribution[
-        Normal(param_means[i], max(param_sds[i], 1e-4))
-        for i in 1:n_params
+        Normal(param_means[i], max(param_sds[i], 1.0e-4))
+            for i in 1:n_params
     ]
 
-    UncertainDistribution(constructor, priors, Float64(max_delay))
+    return UncertainDistribution(constructor, priors, Float64(max_delay))
 end
 
 """
@@ -590,9 +608,9 @@ A Dict mapping region names to Dict of DataFrames
 (`:infections`, `:reports`, `:rt`, `:growth_rate`).
 """
 function get_regional_results(
-    folder::String;
-    regions::Union{Vector{String}, Nothing} = nothing
-)
+        folder::String;
+        regions::Union{Vector{String}, Nothing} = nothing
+    )
     isdir(folder) || throw(ArgumentError("Directory not found: $folder"))
 
     available = filter(d -> isdir(joinpath(folder, d)), readdir(folder))
@@ -605,22 +623,22 @@ function get_regional_results(
 
         region_data = Dict{Symbol, DataFrame}()
         for (name, file) in [
-            (:infections, "infections.csv"),
-            (:reports, "reports.csv"),
-            (:rt, "rt.csv"),
-            (:growth_rate, "growth_rate.csv")
-        ]
+                (:infections, "infections.csv"),
+                (:reports, "reports.csv"),
+                (:rt, "rt.csv"),
+                (:growth_rate, "growth_rate.csv"),
+            ]
             path = joinpath(region_dir, file)
             if isfile(path)
                 region_data[name] = DataFrame(
-                    CSV.File(path; dateformat="yyyy-mm-dd")
+                    CSV.File(path; dateformat = "yyyy-mm-dd")
                 )
             end
         end
         results[region] = region_data
     end
 
-    results
+    return results
 end
 
 """
@@ -638,8 +656,8 @@ opts_list(Dict("A" => rt_opts(rw=7), "B" => rt_opts()))
 ```
 """
 function opts_list(regions::AbstractVector, opts; kwargs...)
-    Dict(string(r) => opts for r in regions)
+    return Dict(string(r) => opts for r in regions)
 end
 function opts_list(d::Dict)
-    Dict(string(k) => v for (k, v) in d)
+    return Dict(string(k) => v for (k, v) in d)
 end

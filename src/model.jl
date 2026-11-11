@@ -18,8 +18,10 @@ Returns a vector of the same length as `signal`. AD-safe (no mutation).
 function convolve(signal::AbstractVector, kernel::AbstractVector)
     n = length(signal)
     k = length(kernel)
-    [sum(signal[t - j + 1] * kernel[j] for j in 1:min(t, k))
-     for t in 1:n]
+    return [
+        sum(signal[t - j + 1] * kernel[j] for j in 1:min(t, k))
+            for t in 1:n
+    ]
 end
 
 # ── Renewal equation ─────────────────────────────────────────────────────
@@ -31,11 +33,11 @@ Generate infections via the renewal equation. Pre-allocates
 the output vector and fills sequentially. Compatible with ForwardDiff.
 """
 function renewal_infections(
-    R::AbstractVector,
-    initial_infections::AbstractVector,
-    gt_pmf::AbstractVector,
-    n_times::Int
-)
+        R::AbstractVector,
+        initial_infections::AbstractVector,
+        gt_pmf::AbstractVector,
+        n_times::Int
+    )
     seeding_time = length(initial_infections)
     total = seeding_time + n_times
     gt_len = length(gt_pmf)
@@ -47,12 +49,12 @@ function renewal_infections(
     for t in (seeding_time + 1):total
         infectiousness = sum(
             infections[t - s] * gt_pmf[s]
-            for s in 1:min(t - 1, gt_len)
+                for s in 1:min(t - 1, gt_len)
         )
         infections[t] = R[t - seeding_time] * infectiousness
     end
 
-    infections
+    return infections
 end
 
 # ── HSGP: Hilbert space Gaussian process approximation ───────────────────
@@ -80,7 +82,7 @@ function hsgp_basis(n_basis::Int, boundary::Float64, n_times::Int)
         λ = j * π / (2.0 * L)
         @. basis[:, j] = sin(λ * (x + L)) / sqrt(L)
     end
-    basis
+    return basis
 end
 
 """
@@ -91,8 +93,10 @@ Matches Stan: `2 * alpha * (sqrt(3)/rho)^1.5 / ((sqrt(3)/rho)^2 + ω²)`.
 """
 function diagSPD_Matern32(alpha, rho, L, n_basis)
     factor = 2.0 * alpha * (sqrt(3.0) / rho)^1.5
-    [factor / ((sqrt(3.0) / rho)^2 + (j * π / (2.0 * L))^2)
-     for j in 1:n_basis]
+    return [
+        factor / ((sqrt(3.0) / rho)^2 + (j * π / (2.0 * L))^2)
+            for j in 1:n_basis
+    ]
 end
 
 """
@@ -102,8 +106,10 @@ Diagonal spectral density for Matérn 1/2 kernel (Ornstein-Uhlenbeck).
 Matches Stan: `alpha * sqrt(2 / (rho * (1/rho² + ω²)))`.
 """
 function diagSPD_Matern12(alpha, rho, L, n_basis)
-    [alpha * sqrt(2.0 / (rho * (1.0 / rho^2 + (j * π / (2.0 * L))^2)))
-     for j in 1:n_basis]
+    return [
+        alpha * sqrt(2.0 / (rho * (1.0 / rho^2 + (j * π / (2.0 * L))^2)))
+            for j in 1:n_basis
+    ]
 end
 
 """
@@ -114,8 +120,10 @@ Matches Stan: `alpha * sqrt(16 * (sqrt(5)/rho)^5 / (3 * ((sqrt(5)/rho)² + ω²)
 """
 function diagSPD_Matern52(alpha, rho, L, n_basis)
     factor = 16.0 * (sqrt(5.0) / rho)^5
-    [alpha * sqrt(factor / (3.0 * ((sqrt(5.0) / rho)^2 + (j * π / (2.0 * L))^2)^3))
-     for j in 1:n_basis]
+    return [
+        alpha * sqrt(factor / (3.0 * ((sqrt(5.0) / rho)^2 + (j * π / (2.0 * L))^2)^3))
+            for j in 1:n_basis
+    ]
 end
 
 """
@@ -124,9 +132,11 @@ end
 Diagonal spectral density for squared exponential (exponentiated quadratic) kernel.
 """
 function diagSPD_EQ(alpha, rho, L, n_basis)
-    [alpha * sqrt(sqrt(2.0 * π) * rho) *
-     exp(-0.25 * (rho * j * π / (2.0 * L))^2)
-     for j in 1:n_basis]
+    return [
+        alpha * sqrt(sqrt(2.0 * π) * rho) *
+            exp(-0.25 * (rho * j * π / (2.0 * L))^2)
+            for j in 1:n_basis
+    ]
 end
 
 """
@@ -139,9 +149,15 @@ Returns vector of length 2*n_basis (cos + sin components).
 """
 function diagSPD_Periodic(alpha, rho, n_basis)
     a = 1.0 / rho^2
-    q = [exp(log(alpha) + 0.5 * (log(2.0) - a +
-         log(besseli(j, a)))) for j in 1:n_basis]
-    vcat(q, q)
+    q = [
+        exp(
+                log(alpha) + 0.5 * (
+                    log(2.0) - a +
+                    log(besseli(j, a))
+                )
+            ) for j in 1:n_basis
+    ]
+    return vcat(q, q)
 end
 
 """
@@ -162,7 +178,7 @@ function hsgp_periodic_basis(n_basis::Int, w0::Float64, n_times::Int)
         basis[:, m] = cos.(mw0x)
         basis[:, n_basis + m] = sin.(mw0x)
     end
-    basis
+    return basis
 end
 
 """
@@ -172,10 +188,10 @@ Compute spectral density weights for HSGP basis functions using
 kernel-specific closed forms matching Stan.
 """
 function hsgp_coefficients(
-    n_basis::Int, boundary::Float64,
-    alpha, rho, kernel::GPKernel, matern_order::Float64
-)
-    if kernel == se
+        n_basis::Int, boundary::Float64,
+        alpha, rho, kernel::GPKernel, matern_order::Float64
+    )
+    return if kernel == se
         diagSPD_EQ(alpha, rho, boundary, n_basis)
     elseif kernel == matern
         if matern_order ≈ 0.5
@@ -200,12 +216,12 @@ end
 Scale expected values by day-of-week effects. AD-safe (no mutation).
 """
 function apply_day_of_week(
-    expected::AbstractVector,
-    effect::AbstractVector,
-    start_day::Int,
-    n::Int
-)
-    [expected[t] * effect[mod1(start_day + t - 1, 7)] for t in 1:n]
+        expected::AbstractVector,
+        effect::AbstractVector,
+        start_day::Int,
+        n::Int
+    )
+    return [expected[t] * effect[mod1(start_day + t - 1, 7)] for t in 1:n]
 end
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -225,62 +241,62 @@ Generative process:
 5. Observe with NegBin/Poisson likelihood
 """
 @model function infections_model(
-    cases::AbstractVector{Int},
-    gt_pmf::AbstractVector{Float64},
-    delay_pmf::AbstractVector{Float64},
-    n_times::Int,
-    n_forecast::Int,
-    seeding_time::Int,
-    initial_infections_guess::Float64,
-    # HSGP basis (precomputed)
-    hsgp_basis_matrix::Union{Matrix{Float64}, Nothing},
-    # Model structure flags
-    use_rt::Bool,
-    use_gp::Bool,
-    gp_n_basis::Int,
-    gp_boundary::Float64,
-    gp_kernel::GPKernel,
-    gp_matern_order::Float64,
-    gp_on::GPTarget,
-    n_noise_terms::Int,
-    use_rw::Bool,
-    rw_period::Int,
-    use_week_effect::Bool,
-    week_length::Int,
-    start_day::Int,
-    obs_family::ObsFamily,
-    use_obs_scale::Bool,
-    # Accumulation
-    accumulate::AbstractVector{Bool},
-    # Population adjustment
-    pop::Float64,
-    pop_prior::Union{Distribution, Nothing},
-    pop_period::PopPeriod,
-    pop_floor::Float64,
-    n_non_horizon::Int,
-    # Priors (passed from options)
-    rt_prior::Distribution,
-    gp_alpha_prior::Distribution,
-    gp_ls_prior::Distribution,
-    obs_dispersion_prior::Distribution,
-    obs_scale_prior::Union{Distribution, Nothing},
-    # Uncertain delay distributions (empty = use fixed gt_pmf/delay_pmf)
-    gt_uncertain::Vector{UncertainDistribution},
-    delay_uncertain::Vector{UncertainDistribution},
-    # Truncation adjustment
-    trunc_rev_cmf::Union{AbstractVector{Float64}, Nothing},
-    trunc_uncertain::Union{UncertainDistribution, Nothing},
-    # Likelihood weight (power-likelihood tempering)
-    obs_weight::Float64,
-    # Breakpoints (0 = no breakpoints, otherwise index array)
-    bp_n::Int,
-    bps::AbstractVector{Int},
-    # Back-calculation
-    shifted_cases::Union{AbstractVector{Float64}, Nothing},
-    backcalc_prior::BackcalcPrior,
-    # Prior weighting (1/n_obs when weight_prior=true)
-    delay_prior_weight::Float64
-)
+        cases::AbstractVector{Int},
+        gt_pmf::AbstractVector{Float64},
+        delay_pmf::AbstractVector{Float64},
+        n_times::Int,
+        n_forecast::Int,
+        seeding_time::Int,
+        initial_infections_guess::Float64,
+        # HSGP basis (precomputed)
+        hsgp_basis_matrix::Union{Matrix{Float64}, Nothing},
+        # Model structure flags
+        use_rt::Bool,
+        use_gp::Bool,
+        gp_n_basis::Int,
+        gp_boundary::Float64,
+        gp_kernel::GPKernel,
+        gp_matern_order::Float64,
+        gp_on::GPTarget,
+        n_noise_terms::Int,
+        use_rw::Bool,
+        rw_period::Int,
+        use_week_effect::Bool,
+        week_length::Int,
+        start_day::Int,
+        obs_family::ObsFamily,
+        use_obs_scale::Bool,
+        # Accumulation
+        accumulate::AbstractVector{Bool},
+        # Population adjustment
+        pop::Float64,
+        pop_prior::Union{Distribution, Nothing},
+        pop_period::PopPeriod,
+        pop_floor::Float64,
+        n_non_horizon::Int,
+        # Priors (passed from options)
+        rt_prior::Distribution,
+        gp_alpha_prior::Distribution,
+        gp_ls_prior::Distribution,
+        obs_dispersion_prior::Distribution,
+        obs_scale_prior::Union{Distribution, Nothing},
+        # Uncertain delay distributions (empty = use fixed gt_pmf/delay_pmf)
+        gt_uncertain::Vector{UncertainDistribution},
+        delay_uncertain::Vector{UncertainDistribution},
+        # Truncation adjustment
+        trunc_rev_cmf::Union{AbstractVector{Float64}, Nothing},
+        trunc_uncertain::Union{UncertainDistribution, Nothing},
+        # Likelihood weight (power-likelihood tempering)
+        obs_weight::Float64,
+        # Breakpoints (0 = no breakpoints, otherwise index array)
+        bp_n::Int,
+        bps::AbstractVector{Int},
+        # Back-calculation
+        shifted_cases::Union{AbstractVector{Float64}, Nothing},
+        backcalc_prior::BackcalcPrior,
+        # Prior weighting (1/n_obs when weight_prior=true)
+        delay_prior_weight::Float64
+    )
     total_times = n_times + n_forecast
 
     # ── Uncertain delay parameters ────────────────────────────────────
@@ -297,8 +313,10 @@ Generative process:
             if !(delay_prior_weight ≈ 1.0)
                 # Scale prior contribution: add (weight-1)*logpdf to get weight*logpdf total
                 Turing.@addlogprob! (delay_prior_weight - 1.0) *
-                    sum(logpdf(p, ud_params[i])
-                        for (i, p) in enumerate(ud.param_priors))
+                    sum(
+                    logpdf(p, ud_params[i])
+                        for (i, p) in enumerate(ud.param_priors)
+                )
             end
             gt_pmfs[ci] = discretise_ad(
                 ud.constructor(ud_params...), Int(ud.max)
@@ -314,8 +332,10 @@ Generative process:
             ud_params ~ arraydist(ud.param_priors)
             if !(delay_prior_weight ≈ 1.0)
                 Turing.@addlogprob! (delay_prior_weight - 1.0) *
-                    sum(logpdf(p, ud_params[i])
-                        for (i, p) in enumerate(ud.param_priors))
+                    sum(
+                    logpdf(p, ud_params[i])
+                        for (i, p) in enumerate(ud.param_priors)
+                )
             end
             delay_pmfs[ci] = discretise_ad(
                 ud.constructor(ud_params...), Int(ud.max)
@@ -334,12 +354,12 @@ Generative process:
     growth = R_to_growth(R0, gt_pmf)
     initial_infections = [
         exp(log_initial_infections + growth * (s - seeding_time))
-        for s in 1:seeding_time
+            for s in 1:seeding_time
     ]
 
     # ── Breakpoints ──────────────────────────────────────────────────
     bp_offset = if bp_n > 0
-        bp_sd ~ truncated(Normal(0.0, 0.1); lower=0.0)
+        bp_sd ~ truncated(Normal(0.0, 0.1); lower = 0.0)
         bp_effects ~ filldist(Normal(0.0, bp_sd), bp_n)
         bp0 = vcat([zero(eltype(bp_effects))], cumsum(bp_effects))
         [bp0[bps[t]] for t in 1:total_times]
@@ -349,8 +369,8 @@ Generative process:
 
     if use_rt && use_gp && !use_rw
         # Gaussian process on log(Rt)
-        gp_alpha ~ truncated(gp_alpha_prior; lower=0.0)
-        gp_rho ~ truncated(gp_ls_prior; lower=0.0)
+        gp_alpha ~ truncated(gp_alpha_prior; lower = 0.0)
+        gp_rho ~ truncated(gp_ls_prior; lower = 0.0)
 
         rescaled_rho = 2.0 * gp_rho / n_noise_terms
 
@@ -386,14 +406,14 @@ Generative process:
     elseif use_rw
         # Random walk on log(Rt)
         n_steps = div(total_times, rw_period)
-        rw_sd ~ truncated(Normal(0.0, 0.1); lower=0.0)
+        rw_sd ~ truncated(Normal(0.0, 0.1); lower = 0.0)
         rw_noise ~ filldist(Normal(0.0, 1.0), n_steps)
 
         rw_values = cumsum(rw_sd .* rw_noise)
         # Expand to daily (AD-safe comprehension)
         log_R = [
             log_R0 + rw_values[min(div(t - 1, rw_period) + 1, n_steps)]
-            for t in 1:total_times
+                for t in 1:total_times
         ]
     elseif use_rt
         # Fixed Rt (no GP, no random walk)
@@ -431,10 +451,10 @@ Generative process:
                 t = seeding_time + s
                 infectiousness = sum(
                     all_infections[t - j] * gt_pmf[j]
-                    for j in 1:min(t - 1, gt_len)
+                        for j in 1:min(t - 1, gt_len)
                 )
                 use_pop = (pop_period == pop_all) ||
-                          (pop_period == pop_forecast && s > n_non_horizon)
+                    (pop_period == pop_forecast && s > n_non_horizon)
                 if use_pop
                     susceptible = max(pop_floor, pop - cum_inf)
                     exp_adj = exp(-R[s] * infectiousness / susceptible)
@@ -459,8 +479,8 @@ Generative process:
         # ── Back-calculation (deconvolution without Rt) ──────────────
         # GP noise applied to shifted cases to recover infections
         if use_gp
-            gp_alpha ~ truncated(gp_alpha_prior; lower=0.0)
-            gp_rho ~ truncated(gp_ls_prior; lower=0.0)
+            gp_alpha ~ truncated(gp_alpha_prior; lower = 0.0)
+            gp_rho ~ truncated(gp_ls_prior; lower = 0.0)
             rescaled_rho = 2.0 * gp_rho / n_noise_terms
             n_gp_terms = gp_kernel == periodic ? 2 * gp_n_basis : gp_n_basis
             gp_z ~ filldist(Normal(0.0, 1.0), n_gp_terms)
@@ -477,16 +497,16 @@ Generative process:
 
         infections = if backcalc_prior == bc_infections
             # Multiplicative correction: infections = shifted_cases * exp(noise)
-            [max(shifted_cases[t] * exp_noise[t], 1e-5) for t in 1:total_times]
+            [max(shifted_cases[t] * exp_noise[t], 1.0e-5) for t in 1:total_times]
         elseif backcalc_prior == bc_none
             # Pure GP: infections = exp(noise)
-            [max(exp_noise[t], 1e-5) for t in 1:total_times]
+            [max(exp_noise[t], 1.0e-5) for t in 1:total_times]
         elseif backcalc_prior == bc_growth_rate
             # Random walk: infections[t] = infections[t-1] * exp(noise[t])
             inf_rw = Vector{eltype(exp_noise)}(undef, total_times)
-            inf_rw[1] = max(shifted_cases[1] * exp_noise[1], 1e-5)
+            inf_rw[1] = max(shifted_cases[1] * exp_noise[1], 1.0e-5)
             for t in 2:total_times
-                inf_rw[t] = max(inf_rw[t-1] * exp_noise[t], 1e-5)
+                inf_rw[t] = max(inf_rw[t - 1] * exp_noise[t], 1.0e-5)
             end
             inf_rw
         else
@@ -497,12 +517,12 @@ Generative process:
         gt_len = length(gt_pmf)
         R = [
             let infectiousness = sum(
-                    infections[max(t - s, 1)] * gt_pmf[s]
-                    for s in 1:min(t - 1, gt_len)
-                )
-                infectiousness > 1e-10 ? infections[t] / infectiousness : 1.0
+                        infections[max(t - s, 1)] * gt_pmf[s]
+                        for s in 1:min(t - 1, gt_len)
+                    )
+                    infectiousness > 1.0e-10 ? infections[t] / infectiousness : 1.0
             end
-            for t in 1:total_times
+                for t in 1:total_times
         ]
         log_R = log.(R)
         # No depletion adjustment in the back-calculation branch.
@@ -547,13 +567,13 @@ Generative process:
         trunc_max = length(trunc_rev_cmf)
         expected_reports = [
             let days_from_end = n_times - t
-                if days_from_end < trunc_max
-                    expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
+                    if days_from_end < trunc_max
+                        expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
                 else
-                    expected_reports[t]
+                        expected_reports[t]
                 end
             end
-            for t in 1:length(expected_reports)
+                for t in 1:length(expected_reports)
         ]
     end
 
@@ -573,16 +593,16 @@ Generative process:
     # ── Likelihood ───────────────────────────────────────────────────
     if obs_family == negbin
         reporting_overdispersion ~ truncated(
-            obs_dispersion_prior; lower=0.0
+            obs_dispersion_prior; lower = 0.0
         )
         φ = 1.0 / reporting_overdispersion^2
         for t in 1:n_times
-            μ = max(expected_reports[t], 1e-6)
+            μ = max(expected_reports[t], 1.0e-6)
             Turing.@addlogprob! obs_weight * _negbin2_logpmf(cases[t], μ, φ)
         end
     else  # poisson
         for t in 1:n_times
-            μ = max(expected_reports[t], 1e-6)
+            μ = max(expected_reports[t], 1.0e-6)
             Turing.@addlogprob! obs_weight * logpdf(Poisson(μ), cases[t])
         end
     end
@@ -611,7 +631,7 @@ Only for use with non-AD-tracked arguments (e.g. for sampling).
 function NegativeBinomial2(μ, φ)
     p = φ / (μ + φ)
     r = φ
-    NegativeBinomial(r, p)
+    return NegativeBinomial(r, p)
 end
 
 """
@@ -623,7 +643,7 @@ Uses the standard formula: log p(y|μ,φ) = logΓ(y+φ) - logΓ(φ) - logΓ(y+1)
     + φ log(φ/(μ+φ)) + y log(μ/(μ+φ))
 """
 function _negbin2_logpmf(y::Int, μ, φ)
-    loggamma(y + φ) - loggamma(φ) - loggamma(y + 1) +
+    return loggamma(y + φ) - loggamma(φ) - loggamma(y + 1) +
         φ * log(φ / (μ + φ)) + y * log(μ / (μ + φ))
 end
 
@@ -647,15 +667,15 @@ running balance `prev − outflow + inflow` (i.e. occupancy), not merely the
 cumulative outflow. AD-safe (works with ForwardDiff dual numbers).
 """
 function calculate_secondary(
-    scaled_primary::AbstractVector,
-    conv_primary::AbstractVector,
-    cumulative::Bool,
-    historic::Bool,
-    primary_hist_additive::Bool,
-    current::Bool,
-    primary_current_additive::Bool;
-    eps::Real = 1e-6
-)
+        scaled_primary::AbstractVector,
+        conv_primary::AbstractVector,
+        cumulative::Bool,
+        historic::Bool,
+        primary_hist_additive::Bool,
+        current::Bool,
+        primary_current_additive::Bool;
+        eps::Real = 1.0e-6
+    )
     n = length(scaled_primary)
     T = promote_type(eltype(scaled_primary), eltype(conv_primary), typeof(eps))
     expected = Vector{T}(undef, n)
@@ -674,31 +694,31 @@ function calculate_secondary(
         end
         expected[i] = s
     end
-    expected
+    return expected
 end
 
 # ── Secondary observations model ─────────────────────────────────────────
 
 @model function secondary_model(
-    primary::AbstractVector{Int},
-    secondary::AbstractVector{Int},
-    delay_pmf::AbstractVector{Float64},
-    n_obs::Int,
-    burn_in::Int,
-    obs_family::ObsFamily,
-    # Secondary model structure flags
-    cumulative::Bool,
-    historic::Bool,
-    primary_hist_additive::Bool,
-    current::Bool,
-    primary_current_additive::Bool,
-    # Day-of-week
-    use_week_effect::Bool,
-    week_length::Int,
-    start_day::Int,
-    # Frac prior
-    frac_prior::Distribution
-)
+        primary::AbstractVector{Int},
+        secondary::AbstractVector{Int},
+        delay_pmf::AbstractVector{Float64},
+        n_obs::Int,
+        burn_in::Int,
+        obs_family::ObsFamily,
+        # Secondary model structure flags
+        cumulative::Bool,
+        historic::Bool,
+        primary_hist_additive::Bool,
+        current::Bool,
+        primary_current_additive::Bool,
+        # Day-of-week
+        use_week_effect::Bool,
+        week_length::Int,
+        start_day::Int,
+        # Frac prior
+        frac_prior::Distribution
+    )
     frac ~ frac_prior
     n_total = length(primary)
     scaled_primary = frac .* Float64.(primary)
@@ -721,15 +741,15 @@ end
     end
 
     if obs_family == negbin
-        overdispersion ~ truncated(Normal(0.0, 0.25); lower=0.0)
+        overdispersion ~ truncated(Normal(0.0, 0.25); lower = 0.0)
         φ = 1.0 / overdispersion^2
         for t in 1:n_obs
-            μ = max(expected[burn_in + t], 1e-6)
+            μ = max(expected[burn_in + t], 1.0e-6)
             Turing.@addlogprob! _negbin2_logpmf(secondary[t], μ, φ)
         end
     else
         for t in 1:n_obs
-            μ = max(expected[burn_in + t], 1e-6)
+            μ = max(expected[burn_in + t], 1.0e-6)
             secondary[t] ~ Poisson(μ)
         end
     end
@@ -753,33 +773,35 @@ function _truncate_obs(reports, rev_cmf, reconstruct::Bool)
     joint_max = min(t, trunc_max)
     first_t = t - joint_max + 1
     first_trunc = trunc_max - joint_max + 1
-    [
+    return [
         k < first_t ? reports[k] :
-        (reconstruct ? reports[k] / rev_cmf[first_trunc + k - first_t] :
-                       reports[k] * rev_cmf[first_trunc + k - first_t])
-        for k in 1:t
+            (
+                reconstruct ? reports[k] / rev_cmf[first_trunc + k - first_t] :
+                reports[k] * rev_cmf[first_trunc + k - first_t]
+            )
+            for k in 1:t
     ]
 end
 
 @model function truncation_model(
-    obs::Matrix{Float64},
-    obs_dist::Vector{Int},
-    max_trunc::Int,
-    meanlog_prior::Distribution,
-    sdlog_prior::Distribution
-)
+        obs::Matrix{Float64},
+        obs_dist::Vector{Int},
+        max_trunc::Int,
+        meanlog_prior::Distribution,
+        sdlog_prior::Distribution
+    )
     n_times, obs_sets = size(obs)
 
     trunc_meanlog ~ meanlog_prior
     trunc_sdlog ~ sdlog_prior
-    reporting_overdispersion ~ truncated(Normal(0.0, 1.0); lower=0.0)
+    reporting_overdispersion ~ truncated(Normal(0.0, 1.0); lower = 0.0)
     φ = 1.0 / sqrt(reporting_overdispersion)
-    sigma ~ truncated(Normal(0.0, 1.0); lower=0.0)
+    sigma ~ truncated(Normal(0.0, 1.0); lower = 0.0)
 
     # Discretise via double interval censoring — the same method used for
     # delays, generation time and secondary observations across the package.
     d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
-    cd = CensoredDistributions.double_interval_censored(d; interval=1, upper=max_trunc + 1)
+    cd = CensoredDistributions.double_interval_censored(d; interval = 1, upper = max_trunc + 1)
     trunc_pmf = [exp(logpdf(cd, k)) for k in 0:max_trunc]
     trunc_pmf = trunc_pmf ./ sum(trunc_pmf)
     trunc_rev_cmf = reverse(cumsum(trunc_pmf))
@@ -793,7 +815,7 @@ end
         start_t = max(1, end_t - max_trunc)
         expected = _truncate_obs(last_obs[start_t:end_t], trunc_rev_cmf, false) .+ sigma
         for (j, idx) in enumerate(start_t:end_t)
-            μ = max(expected[j], 1e-6)
+            μ = max(expected[j], 1.0e-6)
             Turing.@addlogprob! _negbin2_logpmf(round(Int, obs[idx, i]), μ, φ)
         end
     end
@@ -811,16 +833,16 @@ Translate EpiNow2 options into a configured Turing model with all
 structural choices baked in.
 """
 function assemble_model(
-    data::EpiData;
-    generation_time::GTOpts,
-    delays::DelayOpts,
-    truncation::TruncOpts,
-    rt::RtOpts,
-    backcalc::BackcalcOpts,
-    gp::GPOpts,
-    obs::ObsOpts,
-    forecast::ForecastOpts
-)
+        data::EpiData;
+        generation_time::GTOpts,
+        delays::DelayOpts,
+        truncation::TruncOpts,
+        rt::RtOpts,
+        backcalc::BackcalcOpts,
+        gp::GPOpts,
+        obs::ObsOpts,
+        forecast::ForecastOpts
+    )
     n_times = length(data)
     n_forecast = forecast.horizon
     total_times = n_times + n_forecast
@@ -837,20 +859,24 @@ function assemble_model(
         _drop_zero_delay(discretise(generation_time.dist).pmf)
     else
         # Placeholder PMF from prior means (model will recompute)
-        pmfs = [discretise_ad(
-            ud.constructor([mean(p) for p in ud.param_priors]...),
-            Int(ud.max)
-        ) for ud in gt_uncertain]
+        pmfs = [
+            discretise_ad(
+                    ud.constructor([mean(p) for p in ud.param_priors]...),
+                    Int(ud.max)
+                ) for ud in gt_uncertain
+        ]
         reduce(_convolve_pmfs, pmfs)
     end
 
     delay_pmf = if isempty(delay_uncertain)
         discretise(delays.dist).pmf
     else
-        pmfs = [discretise_ad(
-            ud.constructor([mean(p) for p in ud.param_priors]...),
-            Int(ud.max)
-        ) for ud in delay_uncertain]
+        pmfs = [
+            discretise_ad(
+                    ud.constructor([mean(p) for p in ud.param_priors]...),
+                    Int(ud.max)
+                ) for ud in delay_uncertain
+        ]
         reduce(_convolve_pmfs, pmfs)
     end
 
@@ -915,7 +941,7 @@ function assemble_model(
         # Shift back: cases at time t represent infections at t - shift
         shifted = vcat(
             fill(max(1.0, sc[1]), shift),
-            sc[1:end - min(shift, length(sc))]
+            sc[1:(end - min(shift, length(sc)))]
         )
         # Extend for forecast
         if n_forecast > 0
@@ -947,8 +973,10 @@ function assemble_model(
     # Empirical prior on initial infections: log(mean(first 7 cases))
     # Matches Stan's initial_infections_guess
     n_early = min(7, n_times)
-    initial_infections_guess = max(0.0,
-        log(Statistics.mean(data.confirm[1:n_early]) + 1e-6))
+    initial_infections_guess = max(
+        0.0,
+        log(Statistics.mean(data.confirm[1:n_early]) + 1.0e-6)
+    )
 
     model = infections_model(
         data.confirm,
@@ -1005,7 +1033,7 @@ function assemble_model(
         gt_pmf, delay_pmf, rt, obs
     )
 
-    (model=model, metadata=metadata)
+    return (model = model, metadata = metadata)
 end
 
 """
@@ -1033,7 +1061,7 @@ Drop the P(delay=0) element from a PMF and renormalise.
 """
 function _drop_zero_delay(pmf::AbstractVector)
     stripped = pmf[2:end]
-    stripped ./ sum(stripped)
+    return stripped ./ sum(stripped)
 end
 
 # R_to_growth and supporting functions adapted from EpiAware.jl
@@ -1063,7 +1091,7 @@ Solves G(r) = 1/R where G is the negative MGF of the generation interval.
 Uses a fixed number of Newton steps (default 2), which is AD-safe since the
 loop count is deterministic. Based on the approach in EpiAware.jl.
 """
-function R_to_growth(R, gt_pmf; newton_steps::Int=2)
+function R_to_growth(R, gt_pmf; newton_steps::Int = 2)
     n = length(gt_pmf)
     mean_gt = sum(gt_pmf[i] * i for i in 1:n)
     # Small-r approximation as initial guess
@@ -1072,32 +1100,34 @@ function R_to_growth(R, gt_pmf; newton_steps::Int=2)
     for _ in 1:newton_steps
         r -= (R * _neg_mgf(r, gt_pmf) - 1) / (R * _dneg_mgf_dr(r, gt_pmf))
     end
-    r
+    return r
 end
 
 """Extract UncertainDistribution components from any delay specification."""
 function _extract_uncertain(d::UncertainDistribution)
-    UncertainDistribution[d]
+    return UncertainDistribution[d]
 end
 function _extract_uncertain(d::CompositeDelay)
-    UncertainDistribution[c for c in d.components if c isa UncertainDistribution]
+    return UncertainDistribution[c for c in d.components if c isa UncertainDistribution]
 end
 function _extract_uncertain(d)
-    UncertainDistribution[]
+    return UncertainDistribution[]
 end
 
 function _apply_accumulation(
-    expected::AbstractVector, accumulate::AbstractVector{Bool}, n::Int
-)
+        expected::AbstractVector, accumulate::AbstractVector{Bool}, n::Int
+    )
     buf = zero(eltype(expected))
-    [begin
-        buf = buf + expected[t]
-        if !accumulate[t]
-            out = buf
-            buf = zero(eltype(expected))
-            out
-        else
-            zero(eltype(expected))
-        end
-    end for t in 1:n]
+    return [
+        begin
+                buf = buf + expected[t]
+                if !accumulate[t]
+                    out = buf
+                    buf = zero(eltype(expected))
+                    out
+            else
+                    zero(eltype(expected))
+            end
+            end for t in 1:n
+    ]
 end

@@ -43,12 +43,12 @@ result.regional[:A]
 ```
 """
 function regional_epinow(
-    data::DataFrame;
-    non_zero_points::Int = 7,
-    target_folder::Union{String, Nothing} = nothing,
-    verbose::Bool = false,
-    kwargs...
-)
+        data::DataFrame;
+        non_zero_points::Int = 7,
+        target_folder::Union{String, Nothing} = nothing,
+        verbose::Bool = false,
+        kwargs...
+    )
     :region in propertynames(data) || throw(ArgumentError("Data must have a :region column"))
 
     regions = unique(data.region)
@@ -77,12 +77,12 @@ function regional_epinow(
             t0 = time()
             result = epinow(
                 select(region_data, Not(:region));
-                verbose=false, kwargs...
+                verbose = false, kwargs...
             )
             region_results[i] = result
             region_timings[i] = time() - t0
         catch e
-            @warn "Region $region failed" exception=e
+            @warn "Region $region failed" exception = e
             region_results[i] = e
         end
     end
@@ -104,7 +104,7 @@ function regional_epinow(
         end
     end
 
-    RegionalEpinowResult(results, timings)
+    return RegionalEpinowResult(results, timings)
 end
 
 function Base.summary(result::RegionalEpinowResult)
@@ -113,7 +113,7 @@ function Base.summary(result::RegionalEpinowResult)
     rows = DataFrame[]
     for (region, res) in result.regional
         res isa Exception && continue
-        s = summary(res.estimates; type=:snapshot)
+        s = summary(res.estimates; type = :snapshot)
         s[!, :region] .= region
 
         # Add probability of decrease and change category for Rt
@@ -124,5 +124,5 @@ function Base.summary(result::RegionalEpinowResult)
         push!(rows, s)
     end
     isempty(rows) && return DataFrame()
-    vcat(rows...)
+    return vcat(rows...)
 end

@@ -44,35 +44,45 @@ end
 # ── Default priors per family ───────────────────────────────────────────────
 
 function _default_priors(dist::Symbol)
-    if dist == :lognormal
+    return if dist == :lognormal
         # meanlog ~ Normal(1, 1); sdlog ~ HalfNormal(0.5)
-        Distribution[Normal(1.0, 1.0),
-                     truncated(Normal(0.5, 0.5); lower=0.01)]
+        Distribution[
+            Normal(1.0, 1.0),
+            truncated(Normal(0.5, 0.5); lower = 0.01),
+        ]
     elseif dist == :gamma
         # shape ~ HalfNormal(2); rate ~ HalfNormal(0.5)  (matches R)
-        Distribution[truncated(Normal(2.0, 2.0); lower=0.01),
-                     truncated(Normal(0.5, 0.5); lower=0.01)]
+        Distribution[
+            truncated(Normal(2.0, 2.0); lower = 0.01),
+            truncated(Normal(0.5, 0.5); lower = 0.01),
+        ]
     elseif dist == :normal
         # mean ~ Normal(5, 5); sd ~ HalfNormal(1)
-        Distribution[Normal(5.0, 5.0),
-                     truncated(Normal(1.0, 1.0); lower=0.01)]
+        Distribution[
+            Normal(5.0, 5.0),
+            truncated(Normal(1.0, 1.0); lower = 0.01),
+        ]
     elseif dist == :exp
         # rate ~ HalfNormal(0.5)
-        Distribution[truncated(Normal(0.5, 0.5); lower=0.01)]
+        Distribution[truncated(Normal(0.5, 0.5); lower = 0.01)]
     elseif dist == :weibull
         # shape ~ HalfNormal(2); scale ~ HalfNormal(5)
-        Distribution[truncated(Normal(2.0, 2.0); lower=0.01),
-                     truncated(Normal(5.0, 5.0); lower=0.01)]
+        Distribution[
+            truncated(Normal(2.0, 2.0); lower = 0.01),
+            truncated(Normal(5.0, 5.0); lower = 0.01),
+        ]
     else
-        throw(ArgumentError(
-            "estimate_dist supports :lognormal, :gamma, :normal, :exp, " *
-            "and :weibull"
-        ))
+        throw(
+            ArgumentError(
+                "estimate_dist supports :lognormal, :gamma, :normal, :exp, " *
+                    "and :weibull"
+            )
+        )
     end
 end
 
 function _dist_constructor(dist::Symbol)
-    if dist == :lognormal
+    return if dist == :lognormal
         (meanlog, sdlog) -> LogNormal(meanlog, sdlog)
     elseif dist == :gamma
         # R uses rate parameterisation; Distributions.jl's Gamma takes
@@ -119,20 +129,22 @@ function _normalise_dist_data(data::DataFrame)
         n_row = nrow(data)
         pdate_upr = :pdate_upr in cols ? data.pdate_upr : data.pdate_lwr .+ Day(1)
         sdate_upr = :sdate_upr in cols ? data.sdate_upr : data.sdate_lwr .+ Day(1)
-        obs_date  = :obs_date  in cols ? data.obs_date  :
-                    fill(maximum(sdate_upr), n_row)
-        n         = :n         in cols ? Int.(data.n) : ones(Int, n_row)
+        obs_date = :obs_date in cols ? data.obs_date :
+            fill(maximum(sdate_upr), n_row)
+        n = :n in cols ? Int.(data.n) : ones(Int, n_row)
         df = DataFrame(
             delay_lwr = Dates.value.(data.sdate_lwr .- data.pdate_lwr),
-            pwindow   = Dates.value.(pdate_upr .- data.pdate_lwr),
-            obs_time  = Float64.(Dates.value.(obs_date .- data.pdate_lwr)),
-            n         = n,
+            pwindow = Dates.value.(pdate_upr .- data.pdate_lwr),
+            obs_time = Float64.(Dates.value.(obs_date .- data.pdate_lwr)),
+            n = n,
         )
     else
-        throw(ArgumentError(
-            "data must have either a `:delay` column or `:pdate_lwr` " *
-            "and `:sdate_lwr` date columns"
-        ))
+        throw(
+            ArgumentError(
+                "data must have either a `:delay` column or `:pdate_lwr` " *
+                    "and `:sdate_lwr` date columns"
+            )
+        )
     end
 
     # Aggregate identical (delay_lwr, pwindow, obs_time) rows
@@ -144,31 +156,37 @@ end
 
 # ── Turing model ────────────────────────────────────────────────────────────
 
-function _make_primary_event(primary::Symbol, pwindow::Real,
-                             primary_params::Vector{Float64})
+function _make_primary_event(
+        primary::Symbol, pwindow::Real,
+        primary_params::Vector{Float64}
+    )
     if primary == :uniform
         return Uniform(0.0, Float64(pwindow))
     elseif primary == :expgrowth
         # Single fixed growth rate parameter, passed through (not estimated).
-        return ExponentiallyTilted(0.0, Float64(pwindow),
-                                   Float64(primary_params[1]))
+        return ExponentiallyTilted(
+            0.0, Float64(pwindow),
+            Float64(primary_params[1])
+        )
     else
-        throw(ArgumentError(
-            "primary must be :uniform or :expgrowth, got $primary"
-        ))
+        throw(
+            ArgumentError(
+                "primary must be :uniform or :expgrowth, got $primary"
+            )
+        )
     end
 end
 
 @model function _dist_likelihood(
-    delay_lwr::Vector{Int},
-    pwindow::Vector{Int},
-    obs_time::Vector{Float64},
-    weight::Vector{Int},
-    constructor::Function,
-    priors::Vector{<:Distribution},
-    primary::Symbol,
-    primary_params::Vector{Float64},
-)
+        delay_lwr::Vector{Int},
+        pwindow::Vector{Int},
+        obs_time::Vector{Float64},
+        weight::Vector{Int},
+        constructor::Function,
+        priors::Vector{<:Distribution},
+        primary::Symbol,
+        primary_params::Vector{Float64},
+    )
     n_params = length(priors)
     params = Vector{Real}(undef, n_params)
     for i in 1:n_params
@@ -229,23 +247,27 @@ An `EstimateDistResult` with a posterior-mean `UncertainDistribution`
 suitable for passing to `delay_opts()` / `gt_opts()` / `trunc_opts()`.
 """
 function estimate_dist(
-    data::DataFrame;
-    dist::Symbol = :lognormal,
-    priors::Union{Vector{<:Distribution}, Nothing} = nothing,
-    primary::Symbol = :uniform,
-    primary_params::Vector{Float64} = Float64[],
-    obs_time_threshold::Float64 = 2.0,
-    inference::InferenceOpts = inference_opts(),
-    verbose::Bool = false,
-)
-    primary in (:uniform, :expgrowth) || throw(ArgumentError(
-        "primary must be :uniform or :expgrowth, got $primary"
-    ))
+        data::DataFrame;
+        dist::Symbol = :lognormal,
+        priors::Union{Vector{<:Distribution}, Nothing} = nothing,
+        primary::Symbol = :uniform,
+        primary_params::Vector{Float64} = Float64[],
+        obs_time_threshold::Float64 = 2.0,
+        inference::InferenceOpts = inference_opts(),
+        verbose::Bool = false,
+    )
+    primary in (:uniform, :expgrowth) || throw(
+        ArgumentError(
+            "primary must be :uniform or :expgrowth, got $primary"
+        )
+    )
     if primary == :expgrowth && length(primary_params) != 1
-        throw(ArgumentError(
-            "primary_params must contain exactly one growth rate when " *
-            "primary = :expgrowth"
-        ))
+        throw(
+            ArgumentError(
+                "primary_params must contain exactly one growth rate when " *
+                    "primary = :expgrowth"
+            )
+        )
     end
 
     obs = _normalise_dist_data(data)
@@ -260,7 +282,7 @@ function estimate_dist(
     used_priors = isnothing(priors) ? _default_priors(dist) : priors
     constructor = _dist_constructor(dist)
 
-    verbose && @info "Estimating delay distribution..." dist n_obs=nrow(obs)
+    verbose && @info "Estimating delay distribution..." dist n_obs = nrow(obs)
 
     model = _dist_likelihood(
         obs.delay_lwr, obs.pwindow, obs.obs_time, obs.n,
@@ -273,7 +295,7 @@ function estimate_dist(
         adtype = inference.adtype,
     )
     rng = isnothing(inference.seed) ? Random.default_rng() :
-          Random.MersenneTwister(inference.seed)
+        Random.MersenneTwister(inference.seed)
 
     t0 = time()
     chain = if inference.chains > 1
@@ -297,18 +319,18 @@ function estimate_dist(
     end
     elapsed = time() - t0
 
-    verbose && @info "estimate_dist complete" seconds=round(elapsed, digits=1)
+    verbose && @info "estimate_dist complete" seconds = round(elapsed, digits = 1)
 
     # Posterior summary → UncertainDistribution
     n_params = length(used_priors)
     param_means = [mean(vec(Array(chain[Symbol("params[$i]")]))) for i in 1:n_params]
-    param_sds   = [std(vec(Array(chain[Symbol("params[$i]")]))) for i in 1:n_params]
+    param_sds = [std(vec(Array(chain[Symbol("params[$i]")]))) for i in 1:n_params]
 
     fitted = UncertainDistribution(
         constructor,
         Distribution[
-            Normal(param_means[i], max(param_sds[i], 1e-4))
-            for i in 1:n_params
+            Normal(param_means[i], max(param_sds[i], 1.0e-4))
+                for i in 1:n_params
         ],
         Float64(maximum(obs.delay_lwr) * 2),
     )
@@ -317,5 +339,5 @@ function estimate_dist(
         dist, used_priors, primary, primary_params,
         inference, obs_time_threshold,
     )
-    EstimateDistResult(chain, args, obs, fitted, elapsed)
+    return EstimateDistResult(chain, args, obs, fitted, elapsed)
 end

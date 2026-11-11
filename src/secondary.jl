@@ -50,22 +50,22 @@ Estimate the relationship between primary and secondary observations
 `EstimateSecondaryResult` with fitted delay and scaling parameters.
 """
 function estimate_secondary(
-    data::DataFrame;
-    secondary::SecondaryOpts = secondary_opts(),
-    delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
-    obs::ObsOpts = obs_opts(),
-    inference::InferenceOpts = inference_opts(),
-    burn_in::Int = 14,
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
-    verbose::Bool = true
-)
+        data::DataFrame;
+        secondary::SecondaryOpts = secondary_opts(),
+        delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
+        obs::ObsOpts = obs_opts(),
+        inference::InferenceOpts = inference_opts(),
+        burn_in::Int = 14,
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        verbose::Bool = true
+    )
     sec_data = SecondaryData(data)
     n_total = length(sec_data.primary)
     n_obs = n_total - burn_in
 
     delay_pmf = discretise(delays.dist).pmf
 
-    verbose && @info "Estimating secondary observations..." type=secondary.type n_obs
+    verbose && @info "Estimating secondary observations..." type = secondary.type n_obs
 
     start_day = Dates.dayofweek(sec_data.date[1])
     frac_prior = obs.scale isa Distribution ? obs.scale : Beta(5.0, 5.0)
@@ -94,7 +94,7 @@ function estimate_secondary(
     fit = run_inference(model, metadata, inference)
     elapsed = time() - t0
 
-    verbose && @info "Secondary estimation complete" seconds=round(elapsed, digits=1)
+    verbose && @info "Secondary estimation complete" seconds = round(elapsed, digits = 1)
 
     # `predictions` is the posterior predictive (latent expectation + observation
     # noise), matching R's `get_predictions()`. The latent mean is kept separately.
@@ -106,7 +106,7 @@ function estimate_secondary(
     args = EstimateSecondaryArgs(
         secondary, delays, obs, inference, burn_in, CrIs
     )
-    EstimateSecondaryResult(
+    return EstimateSecondaryResult(
         fit, args, sec_data, predictions, predictions_expected, elapsed
     )
 end
@@ -128,12 +128,12 @@ same model as `estimate_secondary` but with fixed parameters.
 A `DataFrame` with `:date`, `:primary`, and `:secondary` columns.
 """
 function simulate_secondary(
-    primary::DataFrame;
-    delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
-    obs::ObsOpts = obs_opts(family=poisson),
-    secondary::SecondaryOpts = secondary_opts(),
-    frac::Float64 = 0.1
-)
+        primary::DataFrame;
+        delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
+        obs::ObsOpts = obs_opts(family = poisson),
+        secondary::SecondaryOpts = secondary_opts(),
+        frac::Float64 = 0.1
+    )
     sorted = sort(primary, :date)
     dates = Date.(sorted.date)
     prim = Int.(sorted.primary)
@@ -147,9 +147,9 @@ function simulate_secondary(
         secondary.current, secondary.primary_current_additive
     )
 
-    sim = [max(0, rand(Poisson(max(e, 1e-6)))) for e in expected]
+    sim = [max(0, rand(Poisson(max(e, 1.0e-6)))) for e in expected]
 
-    DataFrame(date=dates, primary=prim, secondary=sim)
+    return DataFrame(date = dates, primary = prim, secondary = sim)
 end
 
 """
@@ -162,12 +162,12 @@ relationship to the case forecast from `estimate_infections`.
 A `DataFrame` with secondary predictions for the forecast period.
 """
 function forecast_secondary(
-    sec_result::EstimateSecondaryResult,
-    inf_result::EstimateInfectionsResult;
-    delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
-    secondary::SecondaryOpts = secondary_opts(),
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
-)
+        sec_result::EstimateSecondaryResult,
+        inf_result::EstimateInfectionsResult;
+        delays::DelayOpts = delay_opts(LogNormal(2.5, 0.47)),
+        secondary::SecondaryOpts = secondary_opts(),
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+    )
     # Extract posterior samples of frac from secondary fit
     sec_params = get_parameters(sec_result)
     frac_samples = sec_params[:frac]
@@ -176,7 +176,7 @@ function forecast_secondary(
     delay_pmf = discretise(delays.dist).pmf
 
     # Get primary forecast samples
-    primary_samples = get_samples(inf_result; variable=:reports)
+    primary_samples = get_samples(inf_result; variable = :reports)
     forecast_start = inf_result.observations.date[end]
     forecast_samples = filter(r -> r.date > forecast_start, primary_samples)
 
@@ -217,7 +217,7 @@ function forecast_secondary(
         end
     end
 
-    _matrix_to_summary(mat, forecast_dates, CrIs)
+    return _matrix_to_summary(mat, forecast_dates, CrIs)
 end
 
 _summarise_secondary_gq(fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}) =

@@ -33,22 +33,22 @@ summary(result)
 ```
 """
 function estimate_infections(
-    data::DataFrame;
-    generation_time::GTOpts = gt_opts(),
-    delays::DelayOpts = delay_opts(),
-    truncation::TruncOpts = trunc_opts(),
-    rt::RtOpts = rt_opts(),
-    backcalc::BackcalcOpts = backcalc_opts(),
-    gp::GPOpts = gp_opts(),
-    obs::ObsOpts = obs_opts(),
-    forecast::ForecastOpts = forecast_opts(),
-    inference::InferenceOpts = inference_opts(),
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
-    verbose::Bool = true
-)
+        data::DataFrame;
+        generation_time::GTOpts = gt_opts(),
+        delays::DelayOpts = delay_opts(),
+        truncation::TruncOpts = trunc_opts(),
+        rt::RtOpts = rt_opts(),
+        backcalc::BackcalcOpts = backcalc_opts(),
+        gp::GPOpts = gp_opts(),
+        obs::ObsOpts = obs_opts(),
+        forecast::ForecastOpts = forecast_opts(),
+        inference::InferenceOpts = inference_opts(),
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        verbose::Bool = true
+    )
     epi_data = EpiData(data)
 
-    verbose && @info "Assembling model..." n_obs=length(epi_data)
+    verbose && @info "Assembling model..." n_obs = length(epi_data)
 
     assembled = assemble_model(
         epi_data;
@@ -56,19 +56,19 @@ function estimate_infections(
         rt, backcalc, gp, obs, forecast
     )
 
-    verbose && @info "Running inference..." sampler=inference.sampler
+    verbose && @info "Running inference..." sampler = inference.sampler
 
     t0 = time()
     fit = run_inference(assembled.model, assembled.metadata, inference)
     elapsed = time() - t0
 
-    verbose && @info "Inference complete" seconds=round(elapsed, digits=1)
+    verbose && @info "Inference complete" seconds = round(elapsed, digits = 1)
 
     args = EstimateInfectionsArgs(
         generation_time, delays, truncation, rt, backcalc, gp, obs,
         forecast, inference, CrIs,
     )
-    build_result(fit, epi_data, args, elapsed; CrIs)
+    return build_result(fit, epi_data, args, elapsed; CrIs)
 end
 
 """
@@ -88,20 +88,20 @@ summary(result)
 ```
 """
 function epinow(
-    data::DataFrame;
-    generation_time::GTOpts = gt_opts(),
-    delays::DelayOpts = delay_opts(),
-    truncation::TruncOpts = trunc_opts(),
-    rt::RtOpts = rt_opts(),
-    backcalc::BackcalcOpts = backcalc_opts(),
-    gp::GPOpts = gp_opts(),
-    obs::ObsOpts = obs_opts(),
-    forecast::ForecastOpts = forecast_opts(),
-    inference::InferenceOpts = inference_opts(),
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
-    target_folder::Union{String, Nothing} = nothing,
-    verbose::Bool = true
-)
+        data::DataFrame;
+        generation_time::GTOpts = gt_opts(),
+        delays::DelayOpts = delay_opts(),
+        truncation::TruncOpts = trunc_opts(),
+        rt::RtOpts = rt_opts(),
+        backcalc::BackcalcOpts = backcalc_opts(),
+        gp::GPOpts = gp_opts(),
+        obs::ObsOpts = obs_opts(),
+        forecast::ForecastOpts = forecast_opts(),
+        inference::InferenceOpts = inference_opts(),
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        target_folder::Union{String, Nothing} = nothing,
+        verbose::Bool = true
+    )
     t0 = time()
 
     estimates = estimate_infections(
@@ -117,14 +117,17 @@ function epinow(
         _save_results(result, target_folder)
     end
 
-    result
+    return result
 end
 
 function _save_results(result::EpinowResult, folder::String)
     mkpath(folder)
     est = result.estimates
-    for (name, df) in [("infections", est.infections), ("reports", est.reports),
-                        ("rt", est.rt), ("growth_rate", est.growth_rate)]
+    for (name, df) in [
+            ("infections", est.infections), ("reports", est.reports),
+            ("rt", est.rt), ("growth_rate", est.growth_rate),
+        ]
         isempty(df) || CSV.write(joinpath(folder, "$name.csv"), df)
     end
+    return
 end

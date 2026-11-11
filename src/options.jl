@@ -31,7 +31,7 @@ Base.@kwdef struct GTOpts
     weight_prior::Bool = true
 end
 
-gt_opts(dist::DelayDistribution=Dirac(1.0); kwargs...) =
+gt_opts(dist::DelayDistribution = Dirac(1.0); kwargs...) =
     GTOpts(; dist, kwargs...)
 
 # ── Reporting delays ─────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ Base.@kwdef struct DelayOpts
     weight_prior::Bool = true
 end
 
-delay_opts(dist::DelayDistribution=Dirac(0.0); kwargs...) =
+delay_opts(dist::DelayDistribution = Dirac(0.0); kwargs...) =
     DelayOpts(; dist, kwargs...)
 
 # ── Truncation ───────────────────────────────────────────────────────────
@@ -60,10 +60,10 @@ Base.@kwdef struct TruncOpts
     dist::DelayDistribution = Dirac(0.0)
     weight_prior::Bool = false
     meanlog_prior::Distribution = Normal(0.0, 1.0)
-    sdlog_prior::Distribution = truncated(Normal(0.5, 0.5); lower=0.01)
+    sdlog_prior::Distribution = truncated(Normal(0.5, 0.5); lower = 0.01)
 end
 
-trunc_opts(dist::DelayDistribution=Dirac(0.0); kwargs...) =
+trunc_opts(dist::DelayDistribution = Dirac(0.0); kwargs...) =
     TruncOpts(; dist, kwargs...)
 
 # ── Reproduction number ─────────────────────────────────────────────────
@@ -81,7 +81,7 @@ Options for time-varying reproduction number estimation.
 - `gp_on`: Apply GP to `gp_Rt` (non-stationary) or `gp_R0` (stationary) (default: `gp_Rt`)
 - `pop`: Susceptible population for depletion adjustment (default: 0=none)
 """
-Base.@kwdef struct RtOpts{P<:Union{Float64, Distribution}}
+Base.@kwdef struct RtOpts{P <: Union{Float64, Distribution}}
     prior::Distribution = LogNormal(_moments_to_lognormal(1.0, 1.0)...)
     use_rt::Bool = true
     rw::Int = 0
@@ -106,7 +106,7 @@ Setting `basis_prop=0` disables the GP entirely.
 Base.@kwdef struct GPOpts
     basis_prop::Float64 = 0.2
     boundary_scale::Float64 = 1.5
-    ls::Distribution = truncated(LogNormal(_moments_to_lognormal(21.0, 7.0)...); upper=60.0)
+    ls::Distribution = truncated(LogNormal(_moments_to_lognormal(21.0, 7.0)...); upper = 60.0)
     alpha::Distribution = Normal(0.0, 0.01)
     kernel::GPKernel = matern
     matern_order::Float64 = 1.5
@@ -126,7 +126,7 @@ Observation model options. Construct via `obs_opts()`.
 - `week_effect`: day-of-week reporting effects (default: `true`)
 - `scale`: fraction observed, as a `Distribution` for a prior or `Float64` for fixed
 """
-Base.@kwdef struct ObsOpts{S<:Union{Float64, Distribution}}
+Base.@kwdef struct ObsOpts{S <: Union{Float64, Distribution}}
     family::ObsFamily = negbin
     dispersion::Distribution = Normal(0.0, 0.25)
     weight::Float64 = 1.0
@@ -235,18 +235,18 @@ Base.@kwdef struct SecondaryOpts
     primary_current_additive::Bool = false
 end
 
-function secondary_opts(type::SecondaryType=incidence; kwargs...)
-    if type == incidence
+function secondary_opts(type::SecondaryType = incidence; kwargs...)
+    return if type == incidence
         SecondaryOpts(;
-            type=incidence, cumulative=false, historic=true,
-            primary_hist_additive=true, current=false,
-            primary_current_additive=false, kwargs...
+            type = incidence, cumulative = false, historic = true,
+            primary_hist_additive = true, current = false,
+            primary_current_additive = false, kwargs...
         )
     elseif type == prevalence
         SecondaryOpts(;
-            type=prevalence, cumulative=true, historic=true,
-            primary_hist_additive=false, current=true,
-            primary_current_additive=true, kwargs...
+            type = prevalence, cumulative = true, historic = true,
+            primary_hist_additive = false, current = true,
+            primary_current_additive = true, kwargs...
         )
     else
         SecondaryOpts(; type, kwargs...)
@@ -257,29 +257,29 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", o::GTOpts)
     println(io, "Generation time options:")
-    _show_tree(io, o.dist; indent=1)
+    return _show_tree(io, o.dist; indent = 1)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::DelayOpts)
     println(io, "Delay options:")
-    _show_tree(io, o.dist; indent=1)
+    return _show_tree(io, o.dist; indent = 1)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::TruncOpts)
     println(io, "Truncation options:")
-    _show_tree(io, o.dist; indent=1)
+    return _show_tree(io, o.dist; indent = 1)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::RtOpts)
-    m = round(mean(o.prior), digits=2)
-    s = round(std(o.prior), digits=2)
+    m = round(mean(o.prior), digits = 2)
+    s = round(std(o.prior), digits = 2)
     println(io, "Rt options:")
     println(io, "  prior: $(_dist_family(o.prior))(mean=$m, sd=$s)")
     println(io, "  use_rt: $(o.use_rt)")
     o.rw > 0 && println(io, "  random walk period: $(o.rw)")
     println(io, "  gp_on: $(o.gp_on)")
     println(io, "  future: $(o.future)")
-    _has_pop(o) && println(io, "  population: $(o.pop)")
+    return _has_pop(o) && println(io, "  population: $(o.pop)")
 end
 
 _has_pop(o::RtOpts) = o.pop isa Distribution || (o.pop isa Number && o.pop > 0)
@@ -288,12 +288,12 @@ function Base.show(io::IO, ::MIME"text/plain", o::ObsOpts)
     println(io, "Observation model options:")
     println(io, "  family: $(o.family)")
     println(io, "  week_effect: $(o.week_effect)")
-    o.scale isa Distribution && println(io, "  scale: $(o.scale)")
+    return o.scale isa Distribution && println(io, "  scale: $(o.scale)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", o::InferenceOpts)
     println(io, "Inference options:")
     println(io, "  sampler: $(o.sampler)")
     println(io, "  samples: $(o.samples), warmup: $(o.warmup), chains: $(o.chains)")
-    println(io, "  adtype: $(o.adtype)")
+    return println(io, "  adtype: $(o.adtype)")
 end

@@ -21,7 +21,7 @@ struct NonParametricDist
         p = Vector{Float64}(pmf)
         sum(p) ≈ 1.0 || throw(ArgumentError("PMF must sum to 1, got $(sum(p))"))
         all(p .>= 0) || throw(ArgumentError("PMF values must be non-negative"))
-        new(p)
+        return new(p)
     end
 end
 
@@ -41,7 +41,7 @@ UncertainDistribution(
 )
 ```
 """
-struct UncertainDistribution{F<:Function}
+struct UncertainDistribution{F <: Function}
     constructor::F
     param_priors::Vector{<:Distribution}
     max::Float64
@@ -87,23 +87,23 @@ _param_values(d::Normal) = [d.μ, d.σ]
 _param_values(d::Distribution) = collect(params(d))
 
 """Print a delay distribution in R's indented tree format."""
-function _show_tree(io::IO, d::Distribution; indent=0)
-    prefix = "  " ^ indent
-    if d isa Dirac
+function _show_tree(io::IO, d::Distribution; indent = 0)
+    prefix = "  "^indent
+    return if d isa Dirac
         println(io, "$(prefix)- fixed (value: $(d.value))")
     elseif d isa Truncated
-        _show_tree(io, d.untruncated; indent=indent)
+        _show_tree(io, d.untruncated; indent = indent)
     else
         println(io, "$(prefix)- $(_dist_family(d)) distribution:")
         for (name, val) in zip(_param_names(d), _param_values(d))
             println(io, "$(prefix)  $(name):")
-            println(io, "$(prefix)    $(round(val, digits=4))")
+            println(io, "$(prefix)    $(round(val, digits = 4))")
         end
     end
 end
 
-function _show_tree(io::IO, d::UncertainDistribution; indent=0)
-    prefix = "  " ^ indent
+function _show_tree(io::IO, d::UncertainDistribution; indent = 0)
+    prefix = "  "^indent
     mean_params = [mean(p) for p in d.param_priors]
     example = d.constructor(mean_params...)
 
@@ -111,15 +111,16 @@ function _show_tree(io::IO, d::UncertainDistribution; indent=0)
     for (name, prior) in zip(_param_names(example), d.param_priors)
         println(io, "$(prefix)  $(name):")
         prior_inner = prior isa Truncated ? prior.untruncated : prior
-        _show_tree(io, prior_inner; indent=indent + 2)
+        _show_tree(io, prior_inner; indent = indent + 2)
     end
+    return
 end
 
-function _show_tree(io::IO, d::NonParametricDist; indent=0)
-    prefix = "  " ^ indent
+function _show_tree(io::IO, d::NonParametricDist; indent = 0)
+    prefix = "  "^indent
     n = length(d.pmf)
     m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
-    println(io, "$(prefix)- non-parametric distribution (max: $(n - 1), mean: $(round(m, digits=2)))")
+    return println(io, "$(prefix)- non-parametric distribution (max: $(n - 1), mean: $(round(m, digits = 2)))")
 end
 
 # ── Base.show for each type ──
@@ -127,40 +128,41 @@ end
 function Base.show(io::IO, d::NonParametricDist)
     n = length(d.pmf)
     m = sum(i * d.pmf[i + 1] for i in 0:(n - 1) if i + 1 <= n)
-    print(io, "NonParametricDist(max=$(n - 1), mean=$(round(m, digits=2)))")
+    return print(io, "NonParametricDist(max=$(n - 1), mean=$(round(m, digits = 2)))")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", d::NonParametricDist)
-    _show_tree(io, d)
+    return _show_tree(io, d)
 end
 
 function Base.show(io::IO, d::UncertainDistribution)
     mean_params = [mean(p) for p in d.param_priors]
     example = d.constructor(mean_params...)
-    print(io, "Uncertain $(_dist_family(example))(max=$(Int(d.max)))")
+    return print(io, "Uncertain $(_dist_family(example))(max=$(Int(d.max)))")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", d::UncertainDistribution)
-    _show_tree(io, d)
+    return _show_tree(io, d)
 end
 
 function Base.show(io::IO, d::CompositeDelay)
     parts = [sprint(show, c) for c in d.components]
-    print(io, join(parts, " + "))
+    return print(io, join(parts, " + "))
 end
 
 function Base.show(io::IO, ::MIME"text/plain", d::CompositeDelay)
     println(io, "Composite distribution:")
     for c in d.components
-        _show_tree(io, c; indent=0)
+        _show_tree(io, c; indent = 0)
     end
+    return
 end
 
 # ── Operators ────────────────────────────────────────────────────────────
 
 # NonParametricDist + NonParametricDist: convolve PMFs directly
 function Base.:+(a::NonParametricDist, b::NonParametricDist)
-    NonParametricDist(_convolve_pmfs(a.pmf, b.pmf))
+    return NonParametricDist(_convolve_pmfs(a.pmf, b.pmf))
 end
 
 # General DelayDistribution composition
@@ -191,26 +193,26 @@ discretise(LogNormal(1.0, 0.5); max=14) +    # compose with +
 ```
 """
 function discretise(
-    d::Distribution;
-    max::Union{Int, Nothing}=nothing,
-    cdf_cutoff::Float64=0.001
-)
+        d::Distribution;
+        max::Union{Int, Nothing} = nothing,
+        cdf_cutoff::Float64 = 0.001
+    )
     max_val = if !isnothing(max)
         max
     else
         Int(ceil(quantile(d, 1.0 - cdf_cutoff)))
     end
 
-    cd = double_interval_censored(d; interval=1, upper=max_val + 1)
+    cd = double_interval_censored(d; interval = 1, upper = max_val + 1)
     pmf = [pdf(cd, k) for k in 0:max_val]
 
     # Remove trailing near-zeros
-    last_nonzero = findlast(x -> x > 1e-10, pmf)
+    last_nonzero = findlast(x -> x > 1.0e-10, pmf)
     if !isnothing(last_nonzero)
         pmf = pmf[1:last_nonzero]
     end
 
-    NonParametricDist(pmf)
+    return NonParametricDist(pmf)
 end
 
 """
@@ -225,11 +227,11 @@ discretise(d::NonParametricDist; kwargs...) = NonParametricDist(copy(d.pmf))
 
 Discretise at the prior mean parameter values.
 """
-function discretise(d::UncertainDistribution; max::Union{Int, Nothing}=nothing, kwargs...)
+function discretise(d::UncertainDistribution; max::Union{Int, Nothing} = nothing, kwargs...)
     mean_params = [mean(p) for p in d.param_priors]
     max_val = isnothing(max) ? Int(d.max) : max
     dist = d.constructor(mean_params...)
-    discretise(dist; max=max_val, kwargs...)
+    return discretise(dist; max = max_val, kwargs...)
 end
 
 """
@@ -240,7 +242,7 @@ Discretise a point mass distribution.
 function discretise(d::Dirac; kwargs...)
     v = Int(d.value)
     pmf = v == 0 ? [1.0] : [zeros(v); 1.0]
-    NonParametricDist(pmf)
+    return NonParametricDist(pmf)
 end
 
 """
@@ -250,7 +252,7 @@ Discretise a composite delay by convolving component PMFs.
 """
 function discretise(d::CompositeDelay; kwargs...)
     pmfs = [discretise(c; kwargs...).pmf for c in d.components]
-    NonParametricDist(reduce(_convolve_pmfs, pmfs))
+    return NonParametricDist(reduce(_convolve_pmfs, pmfs))
 end
 
 # ── PMF convolution ──────────────────────────────────────────────────────
@@ -267,8 +269,10 @@ convolve_pmfs(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}) =
 
 function _convolve_pmfs(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
     na, nb = length(a), length(b)
-    [sum(a[i] * b[k - i + 1] for i in max(1, k - nb + 1):min(k, na))
-     for k in 1:(na + nb - 1)]
+    return [
+        sum(a[i] * b[k - i + 1] for i in max(1, k - nb + 1):min(k, na))
+            for k in 1:(na + nb - 1)
+    ]
 end
 
 # ── AD-safe discretisation ───────────────────────────────────────────────
@@ -284,11 +288,11 @@ Uses CensoredDistributions.jl which supports ForwardDiff through
 both LogNormal and Gamma distribution parameters.
 """
 function discretise_ad(d::Distribution, max_val::Int)
-    cd = double_interval_censored(d; interval=1, upper=max_val + 1)
+    cd = double_interval_censored(d; interval = 1, upper = max_val + 1)
     # 0-indexed PMF from CensoredDistributions, then drop delay 0
     pmf_full = [exp(logpdf(cd, k)) for k in 0:max_val]
     pmf = pmf_full[2:end]
-    pmf ./ sum(pmf)
+    return pmf ./ sum(pmf)
 end
 
 # ── Internal helpers ─────────────────────────────────────────────────────
@@ -296,5 +300,5 @@ end
 function _moments_to_lognormal(mean, sd)
     σ² = log(1 + (sd / mean)^2)
     μ = log(mean) - σ² / 2
-    (μ, sqrt(σ²))
+    return (μ, sqrt(σ²))
 end
