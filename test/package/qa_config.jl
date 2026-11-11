@@ -20,9 +20,11 @@ const QA_CONFIG = (
     formatter_env = joinpath(@__DIR__, "..", "formatter"),
 
     # Per-check Aqua relaxations, e.g. (; ambiguities = false). Empty = all on.
-    # Piracy is relaxed for `+` on delay distributions: `LogNormal(...) +
-    # Gamma(...)` composes delays the way `+` does on R's `dist_spec`, and
-    # Distributions.jl defines no `+` between two distributions to clash with.
+    # The piracy check is off here because it cannot exempt a single
+    # function: `+` on delay distributions composes delays the way `+` does
+    # on R's `dist_spec`, and Distributions.jl defines no `+` between two
+    # distributions to clash with. test/unit/piracy.jl runs the check with
+    # only `Base.:+` exempted.
     aqua = (; piracies = false),
 
     # ExplicitImports `ignore`: symbols the main module legitimately imports
