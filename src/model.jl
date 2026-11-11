@@ -217,11 +217,11 @@ function diagSPD_Periodic(alpha, rho, n_basis)
     a = 1.0 / rho^2
     q = [
         exp(
-                log(alpha) + 0.5 * (
-                    log(2.0) - a +
+            log(alpha) + 0.5 * (
+                log(2.0) - a +
                     log(besseli(j, a))
-                )
-            ) for j in 1:n_basis
+            )
+        ) for j in 1:n_basis
     ]
     return vcat(q, q)
 end
@@ -561,10 +561,10 @@ Generative process:
         gt_len = length(gt_pmf)
         R = [
             let infectiousness = sum(
-                        infections[max(t - s, 1)] * gt_pmf[s]
+                    infections[max(t - s, 1)] * gt_pmf[s]
                         for s in 1:min(t - 1, gt_len)
-                    )
-                    infectiousness > 1.0e-10 ? infections[t] / infectiousness : 1.0
+                )
+                infectiousness > 1.0e-10 ? infections[t] / infectiousness : 1.0
             end
                 for t in 1:total_times
         ]
@@ -617,10 +617,10 @@ Generative process:
         trunc_max = length(trunc_rev_cmf)
         expected_reports = [
             let days_from_end = n_times - t
-                    if days_from_end < trunc_max
-                        expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
+                if days_from_end < trunc_max
+                    expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
                 else
-                        expected_reports[t]
+                    expected_reports[t]
                 end
             end
                 for t in 1:length(expected_reports)
@@ -1275,14 +1275,14 @@ function _apply_accumulation(
     buf = zero(eltype(expected))
     return [
         begin
-                buf = buf + expected[t]
-                if !accumulate[t]
-                    out = buf
-                    buf = zero(eltype(expected))
-                    out
+            buf = buf + expected[t]
+            if !accumulate[t]
+                out = buf
+                buf = zero(eltype(expected))
+                out
             else
-                    zero(eltype(expected))
+                zero(eltype(expected))
             end
-            end for t in 1:n
+        end for t in 1:n
     ]
 end
