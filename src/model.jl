@@ -1185,11 +1185,6 @@ end
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
-"""
-    _drop_zero_delay(pmf)
-
-Drop the P(delay=0) element from a PMF and renormalise.
-"""
 # R truncates the Rt prior to positive values (`T[0, ]`); a lognormal or
 # gamma prior is already positive.
 _positive_prior(d::Distribution) = minimum(d) < 0 ? truncated(d; lower = 0.0) : d
@@ -1200,6 +1195,11 @@ function _hold_forward(x::AbstractVector, n::Int)
     return vcat(x, fill(x[end], n - length(x)))
 end
 
+"""
+    _drop_zero_delay(pmf)
+
+Drop the P(delay=0) element from a PMF and renormalise.
+"""
 function _drop_zero_delay(pmf::AbstractVector)
     stripped = pmf[2:end]
     return stripped ./ sum(stripped)
