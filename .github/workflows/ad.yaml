@@ -9,6 +9,10 @@ name: AD
 # single source of truth) rather than left to the reusable's own default,
 # so the CI matrix can never drift from the badges/codecov flags this
 # package generates.
+#
+# `timeout_minutes` is passed only when the package sets `ad_timeout`, so a
+# package whose slowest backend runs close to the reusable's own cap can
+# raise it while every other package keeps the default.
 
 on:
   push:
@@ -34,7 +38,7 @@ concurrency:
 
 jobs:
   ad:
-    uses: EpiAware/.github/.github/workflows/ad.yml@42a0501ccacefbfc2f2eeca640714a19c50bfe58
+    uses: EpiAware/.github/.github/workflows/ad.yml@25424fb7f3b6bec94209bab86a42971bd01621ea
     with:
       backends: '[{"name":"ForwardDiff","tag":"forwarddiff","flag":"ad-forwarddiff"},{"name":"ReverseDiff (tape)","tag":"reversediff","flag":"ad-reversediff"},{"name":"ReverseDiff (compiled)","tag":"reversediff_compiled","flag":"ad-reversediff-compiled"},{"name":"Enzyme forward","tag":"enzyme_forward","flag":"ad-enzyme-forward"},{"name":"Enzyme reverse","tag":"enzyme_reverse","flag":"ad-enzyme-reverse"},{"name":"Mooncake reverse","tag":"mooncake_reverse","flag":"ad-mooncake-reverse"},{"name":"Mooncake forward","tag":"mooncake_forward","flag":"ad-mooncake-forward"}]'
     secrets: inherit  # pragma: allowlist secret
