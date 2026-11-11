@@ -1,11 +1,13 @@
 #!/usr/bin/env julia
 # MANAGED by EpiAwarePackageTools.scaffold — do not edit by hand.
+# EPIAWARE_MANAGED_OVERRIDE: Enzyme is not loaded because this package drops
+# it from the AD environment (see test/ad/setup.jl).
 #
 # Run selected AD scenarios against selected backends, for fast
 # diagnosis/fix/prototyping. CI is driven by `runtests.jl` and the ad.yaml
 # matrix.
 #
-#   julia --project=test/ad test/ad/run_selected.jl --backend enzyme \
+#   julia --project=test/ad test/ad/run_selected.jl --backend mooncake \
 #       --scenario AR
 #
 # `--backend` and `--scenario` are repeatable case-insensitive substring
@@ -13,7 +15,7 @@
 
 using ADFixtures, ADTypes, DifferentiationInterface
 # Load the backends so DifferentiationInterface registers their extensions.
-using ForwardDiff, ReverseDiff, Enzyme, Mooncake
+using ForwardDiff, ReverseDiff, Mooncake
 using EpiAwarePackageTools
 
 function main()
