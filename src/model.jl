@@ -338,6 +338,7 @@ Generative process:
         pop_period::PopPeriod,
         pop_floor::Float64,
         n_non_horizon::Int,
+        pop_start::Int,
         # Priors (passed from options)
         rt_prior::Distribution,
         gp_alpha_prior::Distribution,
@@ -499,7 +500,7 @@ Generative process:
                         for j in 1:min(t - 1, gt_len)
                 )
                 use_pop = (pop_period == pop_all) ||
-                    (pop_period == pop_forecast && s > n_non_horizon)
+                    (pop_period == pop_forecast && s > pop_start)
                 if use_pop
                     susceptible = max(pop_floor, pop - cum_inf)
                     exp_adj = exp(-R[s] * infectiousness / susceptible)
@@ -1094,6 +1095,9 @@ function assemble_model(
         rt.pop_period,
         rt.pop_floor,
         n_times,  # n_non_horizon (observations period)
+        # Depletion for `pop_forecast` starts where Rt stops being
+        # estimated, as R's `ot - ht`.
+        n_times + fixed_offset,  # pop_start
         # Priors
         _positive_prior(rt.prior),
         gp.alpha,

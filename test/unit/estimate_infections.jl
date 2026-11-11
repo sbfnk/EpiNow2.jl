@@ -430,3 +430,19 @@ end
     @test seeding(LogNormal(1.6, 0.5) + LogNormal(1.6, 0.5)) ==
         round(Int, 2 * exp(1.6 + 0.5^2 / 2))
 end
+
+@testitem "forecast depletion starts where Rt is held" setup = [TestSetup] begin
+    data = EpiNow2.EpiData(_test_data())
+    assemble(future) = EpiNow2.assemble_model(
+        data;
+        generation_time = gt_opts(discretise(LogNormal(1.6, 0.5); max = 10)),
+        delays = delay_opts(Dirac(0.0)), truncation = trunc_opts(),
+        rt = rt_opts(future = future, pop = 1.0e6),
+        backcalc = EpiNow2.backcalc_opts(), gp = gp_opts(),
+        obs = obs_opts(), forecast = forecast_opts(horizon = 7)
+    )
+    held = assemble(EpiNow2.estimate)
+    @test held.model.args.pop_start ==
+        length(data) - held.metadata.seeding_time
+    @test assemble(EpiNow2.latest).model.args.pop_start == length(data)
+end
