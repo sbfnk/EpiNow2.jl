@@ -27,7 +27,7 @@ Result of `estimate_truncation()`.
 struct EstimateTruncationResult
     fit::EpiNow2Fit
     args::EstimateTruncationArgs
-    dist::DelayDistribution
+    dist::Union{DelayDistribution, CompositeDelay}
     observations::Vector{EpiData}
     timing::Float64
 end
@@ -62,7 +62,8 @@ are complete, as a lognormal distribution.
 # Returns
 An `EstimateTruncationResult` whose `dist` field holds the estimated
 truncation distribution, to pass to [`trunc_opts`](@ref) for
-[`epinow`](@ref) or [`estimate_infections`](@ref).
+[`epinow`](@ref) or [`estimate_infections`](@ref). For a composite
+`truncation`, the fixed parts are kept alongside the fitted one.
 
 ```@example estimate_truncation
 using EpiNow2, DataFrames
@@ -152,8 +153,16 @@ function estimate_truncation(
     return EstimateTruncationResult(fit, args, fitted_dist, epi_datas, elapsed)
 end
 
+# The fitted truncation: the uncertain part at its posterior mean
+# parameters, together with any fixed parts it was fitted alongside.
 function _extract_truncation_dist(fit::EpiNow2Fit, dist, trunc)
     isnothing(trunc) && return dist
     params = reduce(hcat, [gq.trunc_params for gq in fit.generated_quantities])
-    return trunc.constructor(vec(mean(params; dims = 2))...)
+    fitted = trunc.constructor(vec(mean(params; dims = 2))...)
+    dist isa CompositeDelay || return fitted
+    return CompositeDelay(
+        DelayDistribution[
+            c isa UncertainDistribution ? fitted : c for c in dist.components
+        ]
+    )
 end

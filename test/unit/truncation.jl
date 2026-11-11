@@ -62,3 +62,28 @@ end
     @test result.dist isa Gamma
     @test !(:reporting_overdispersion in names(result.fit.chain))
 end
+
+@testitem "estimate_truncation keeps the fixed part of a composite" setup = [TestSetup] begin
+    dates = Date(2024, 1, 1):Day(1):Date(2024, 1, 30)
+    full_cases = round.(Int, 100 .* exp.(0.03 .* (1:30)))
+    snapshots = [
+        DataFrame(date = collect(dates[1:n]), confirm = full_cases[1:n])
+            for n in (20, 25, 30)
+    ]
+    fixed = discretise(LogNormal(0.2, 0.3); max = 3)
+    uncertain = UncertainDistribution(
+        (μ, σ) -> LogNormal(μ, σ),
+        [Normal(0.0, 1.0), truncated(Normal(1.0, 1.0); lower = 0.0)],
+        6.0
+    )
+    result = estimate_truncation(
+        snapshots;
+        truncation = trunc_opts(uncertain + fixed),
+        inference = _fast_inference(),
+        verbose = false
+    )
+    @test result.dist isa EpiNow2.CompositeDelay
+    @test any(c -> c isa LogNormal, result.dist.components)
+    @test fixed in result.dist.components
+    @test !any(c -> c isa UncertainDistribution, result.dist.components)
+end
