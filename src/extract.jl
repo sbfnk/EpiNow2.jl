@@ -225,10 +225,11 @@ get_parameters(result::EpinowResult) = get_parameters(result.estimates)
 function get_parameters(result)
     chain = result.fit.chain
     params = Dict{Symbol, Any}()
-    for name in names(chain)
-        # Skip array parameters (infections[1], etc.)
-        occursin("[", string(name)) && continue
-        params[Symbol(name)] = vec(Array(chain[name]))
+    for vn in FlexiChains.parameters(chain)
+        draws = vec(Array(chain[vn]))
+        # Skip array parameters (the GP weights, etc.)
+        eltype(draws) <: Real || continue
+        params[Symbol(string(vn))] = draws
     end
     params
 end
@@ -329,7 +330,8 @@ end
 """Extract a scalar chain parameter as a per-sample vector, or `nothing`."""
 function _chain_vector(fit::EpiNow2Fit, name::Symbol)
     chain = fit.chain
-    name in names(chain) || return nothing
+    any(vn -> Symbol(string(vn)) == name, FlexiChains.parameters(chain)) ||
+        return nothing
     vec(Array(chain[name]))
 end
 
