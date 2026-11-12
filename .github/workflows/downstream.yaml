@@ -33,5 +33,5 @@ jobs:
       # JSON list of downstreams. Each entry needs `repo` (owner/name) and may
       # set `group` (GROUP env for the downstream suite) and `allow_fail` (true
       # keeps a failure from reding the run). Empty by default; e.g.:
-      #   [{"repo":"EpiAware/SomeDownstream.jl","group":"All"}]
+      #   [{"repo":"sbfnk/SomeDownstream.jl","group":"All"}]
       downstreams: '[]'
