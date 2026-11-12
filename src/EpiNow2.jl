@@ -28,7 +28,7 @@ using Dates
 using DataFrames
 using Distributions
 using LinearAlgebra
-using MCMCChains
+using FlexiChains: FlexiChains, VNChain
 using Mooncake
 using PrecompileTools
 using Random
