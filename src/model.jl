@@ -59,6 +59,72 @@ end
 
 # ── HSGP: Hilbert space Gaussian process approximation ───────────────────
 
+# ── HSGP approximation settings ──────────────────────────────────────────
+
+# Half the range of the time points the GP is defined on.
+gp_half_range(n::Int) = max(n - 1, 1) / 2
+
+# Constants (m_factor, c_factor) from Riutort-Mayol et al. (2023) relating
+# the lengthscale to the number of basis functions and the boundary that
+# approximate it well; c_factor is unused for the periodic kernel.
+function gp_approx_constants(kernel::GPKernel, matern_order::Float64)
+    kernel == periodic && return (m_factor = 3.72, c_factor = NaN)
+    (kernel == se || isinf(matern_order)) &&
+        return (m_factor = 1.75, c_factor = 3.2)
+    matern_order == 2.5 && return (m_factor = 2.65, c_factor = 4.1)
+    matern_order == 0.5 && return (m_factor = 8.6, c_factor = 4.5)
+    return (m_factor = 3.42, c_factor = 4.5)
+end
+
+# Quantiles of the lengthscale prior restricted to positive values.
+function gp_ls_quantiles(ls::Distribution, probs = (0.05, 0.95))
+    p_lower = cdf(ls, 0.0)
+    return [quantile(ls, p_lower + p * (1 - p_lower)) for p in probs]
+end
+
+"""
+    gp_basis_settings(gp::GPOpts, n::Int) -> (L, M)
+
+Boundary factor `L` and number of basis functions `M` of the Hilbert space
+approximation to a GP over `n` time points. Values left as `nothing` in `gp`
+are chosen from the lengthscale prior so that lengthscales between its 5% and
+95% quantiles are approximated well, as in R's `gp_basis_settings()`.
+"""
+function gp_basis_settings(gp::GPOpts, n::Int)
+    S = gp_half_range(n)
+    is_periodic = gp.kernel == periodic
+    constants = gp_approx_constants(gp.kernel, gp.matern_order)
+    q = gp_ls_quantiles(gp.ls)
+    L = if is_periodic
+        something(gp.boundary_scale, 1.5)
+    else
+        something(gp.boundary_scale, max(1.2, constants.c_factor * q[2] / S))
+    end
+    M = if isnothing(gp.basis_prop)
+        ceil(Int, constants.m_factor * (is_periodic ? 1.0 : L) * S / q[1])
+    else
+        ceil(Int, n * gp.basis_prop)
+    end
+    return (Float64(L), max(1, M))
+end
+
+"""
+    gp_ls_range(gp::GPOpts, n, L, M) -> (lower, upper)
+
+Range of lengthscales (in days) that a Hilbert space GP approximation with
+boundary factor `L` and `M` basis functions over `n` time points represents
+accurately.
+"""
+function gp_ls_range(gp::GPOpts, n::Int, L::Float64, M::Int)
+    constants = gp_approx_constants(gp.kernel, gp.matern_order)
+    S = gp_half_range(n)
+    is_periodic = gp.kernel == periodic
+    return (
+        constants.m_factor * (is_periodic ? 1.0 : L) * S / M,
+        is_periodic ? Inf : L * S / constants.c_factor,
+    )
+end
+
 """
     hsgp_basis(n_basis, boundary, n_times)
 
@@ -259,8 +325,6 @@ Generative process:
         gp_matern_order::Float64,
         gp_on::GPTarget,
         n_noise_terms::Int,
-        use_rw::Bool,
-        rw_period::Int,
         use_week_effect::Bool,
         week_length::Int,
         start_day::Int,
@@ -274,6 +338,7 @@ Generative process:
         pop_period::PopPeriod,
         pop_floor::Float64,
         n_non_horizon::Int,
+        pop_start::Int,
         # Priors (passed from options)
         rt_prior::Distribution,
         gp_alpha_prior::Distribution,
@@ -294,137 +359,118 @@ Generative process:
         # Back-calculation
         shifted_cases::Union{AbstractVector{Float64}, Nothing},
         backcalc_prior::BackcalcPrior,
-        # Prior weighting (1/n_obs when weight_prior=true)
-        delay_prior_weight::Float64
+        # Fixed components convolved with the sampled uncertain ones
+        gt_fixed_pmf::AbstractVector{Float64},
+        delay_fixed_pmf::AbstractVector{Float64},
+        trunc_fixed_pmf::AbstractVector{Float64},
+        # Prior weights: the number of observed time points when
+        # `weight_prior` is set, as in R, otherwise 1
+        gt_prior_weight::Float64,
+        delay_prior_weight::Float64,
+        trunc_prior_weight::Float64
     )
     total_times = n_times + n_forecast
 
     # ── Uncertain delay parameters ────────────────────────────────────
-    # When delay distributions have uncertain parameters, sample them
-    # and recompute the PMF. Otherwise use the precomputed fixed PMF.
+    # When delay distributions have uncertain parameters, sample them and
+    # recompute the PMF, convolved with any fixed components. Each delay's
+    # prior is weighted by `*_prior_weight`, as R's `weight_prior` does.
     if !isempty(gt_uncertain)
-        gt_pmfs = Vector{Any}(undef, length(gt_uncertain))
+        gt_params = Vector{Any}(undef, length(gt_uncertain))
         for (ci, ud) in enumerate(gt_uncertain)
-            # Sample all params as one tracked vector via arraydist; this
-            # gives ReverseDiff a typed storage to write gradients into.
-            # (`Vector{Real}(undef, ...)` was abstract-eltype and broke
-            # ReverseDiff's increment_deriv! propagation.)
-            ud_params ~ arraydist(ud.param_priors)
-            if !(delay_prior_weight ≈ 1.0)
-                # Scale prior contribution: add (weight-1)*logpdf to get weight*logpdf total
-                Turing.@addlogprob! (delay_prior_weight - 1.0) *
-                    sum(
-                    logpdf(p, ud_params[i])
-                        for (i, p) in enumerate(ud.param_priors)
-                )
+            gt_params[ci] ~ arraydist(ud.param_priors)
+            if gt_prior_weight != 1
+                Turing.@addlogprob! (gt_prior_weight - 1) *
+                    _prior_logpdf(ud, gt_params[ci])
             end
-            gt_pmfs[ci] = discretise_ad(
-                ud.constructor(ud_params...), Int(ud.max)
-            )
         end
-        gt_pmf = length(gt_pmfs) == 1 ? gt_pmfs[1] :
-            reduce((a, b) -> _convolve_pmfs(a, b), gt_pmfs)
+        gt_pmf = _drop_zero_delay(
+            _uncertain_pmf(gt_uncertain, gt_params, gt_fixed_pmf)
+        )
     end
 
     if !isempty(delay_uncertain)
-        delay_pmfs = Vector{Any}(undef, length(delay_uncertain))
+        delay_params = Vector{Any}(undef, length(delay_uncertain))
         for (ci, ud) in enumerate(delay_uncertain)
-            ud_params ~ arraydist(ud.param_priors)
-            if !(delay_prior_weight ≈ 1.0)
-                Turing.@addlogprob! (delay_prior_weight - 1.0) *
-                    sum(
-                    logpdf(p, ud_params[i])
-                        for (i, p) in enumerate(ud.param_priors)
-                )
+            delay_params[ci] ~ arraydist(ud.param_priors)
+            if delay_prior_weight != 1
+                Turing.@addlogprob! (delay_prior_weight - 1) *
+                    _prior_logpdf(ud, delay_params[ci])
             end
-            delay_pmfs[ci] = discretise_ad(
-                ud.constructor(ud_params...), Int(ud.max)
-            )
         end
-        delay_pmf = length(delay_pmfs) == 1 ? delay_pmfs[1] :
-            reduce((a, b) -> _convolve_pmfs(a, b), delay_pmfs)
-    end
-
-    # ── Priors: Rt ───────────────────────────────────────────────────
-    R0 ~ rt_prior
-    log_R0 = log(R0)
-
-    # ── Initial conditions (seeding) ─────────────────────────────────
-    log_initial_infections ~ Normal(initial_infections_guess, 2.0)
-    growth = R_to_growth(R0, gt_pmf)
-    initial_infections = [
-        exp(log_initial_infections + growth * (s - seeding_time))
-            for s in 1:seeding_time
-    ]
-
-    # ── Breakpoints ──────────────────────────────────────────────────
-    bp_offset = if bp_n > 0
-        bp_sd ~ truncated(Normal(0.0, 0.1); lower = 0.0)
-        bp_effects ~ filldist(Normal(0.0, bp_sd), bp_n)
-        bp0 = vcat([zero(eltype(bp_effects))], cumsum(bp_effects))
-        [bp0[bps[t]] for t in 1:total_times]
-    else
-        fill(0.0, total_times)
-    end
-
-    if use_rt && use_gp && !use_rw
-        # Gaussian process on log(Rt)
-        gp_alpha ~ truncated(gp_alpha_prior; lower = 0.0)
-        gp_rho ~ truncated(gp_ls_prior; lower = 0.0)
-
-        rescaled_rho = 2.0 * gp_rho / n_noise_terms
-
-        # Periodic kernel uses 2*n_basis terms (cos + sin components)
-        n_gp_terms = gp_kernel == periodic ? 2 * gp_n_basis : gp_n_basis
-        gp_z ~ filldist(Normal(0.0, 1.0), n_gp_terms)
-
-        spd_weights = hsgp_coefficients(
-            gp_n_basis, gp_boundary,
-            gp_alpha, rescaled_rho, gp_kernel, gp_matern_order
+        delay_pmf = _uncertain_pmf(
+            delay_uncertain, delay_params, delay_fixed_pmf
         )
-        gp_f = hsgp_basis_matrix * (spd_weights .* gp_z)
-
-        if gp_on == gp_R0
-            # Stationary: GP values added directly, extend last value
-            gp_full = if length(gp_f) < total_times
-                vcat(gp_f, fill(gp_f[end], total_times - length(gp_f)))
-            else
-                gp_f[1:total_times]
-            end
-            log_R = log_R0 .+ gp_full
-        else
-            # Non-stationary: cumsum of GP increments, prepend 0
-            gp_cumsum = vcat([zero(eltype(gp_f))], cumsum(gp_f))
-            # Extend to total_times by holding last value constant
-            gp_full = if length(gp_cumsum) < total_times
-                vcat(gp_cumsum, fill(gp_cumsum[end], total_times - length(gp_cumsum)))
-            else
-                gp_cumsum[1:total_times]
-            end
-            log_R = log_R0 .+ gp_full
-        end
-    elseif use_rw
-        # Random walk on log(Rt)
-        n_steps = div(total_times, rw_period)
-        rw_sd ~ truncated(Normal(0.0, 0.1); lower = 0.0)
-        rw_noise ~ filldist(Normal(0.0, 1.0), n_steps)
-
-        rw_values = cumsum(rw_sd .* rw_noise)
-        # Expand to daily (AD-safe comprehension)
-        log_R = [
-            log_R0 + rw_values[min(div(t - 1, rw_period) + 1, n_steps)]
-                for t in 1:total_times
-        ]
-    elseif use_rt
-        # Fixed Rt (no GP, no random walk)
-        log_R = fill(log_R0, total_times)
     end
 
     if use_rt
-        # Apply breakpoint offsets
-        if bp_n > 0
-            log_R = log_R .+ bp_offset
+        # ── Rt ───────────────────────────────────────────────────────
+        # The sampled intercept is the mean of log Rt over the observed
+        # window, which keeps it from trading off against the GP and
+        # breakpoint paths. The user's Rt prior applies to the derived
+        # initial Rt, R[1], below.
+        R_mean ~ Turing.FlatPos(0.0)
+
+        gp_path = if use_gp
+            gp_alpha ~ truncated(gp_alpha_prior; lower = 0.0)
+            gp_rho ~ truncated(gp_ls_prior; lower = 0.0)
+            rescaled_rho = 2.0 * gp_rho / max(n_noise_terms - 1, 1)
+            # Periodic kernel uses 2*n_basis terms (cos + sin components)
+            n_gp_terms = gp_kernel == periodic ? 2 * gp_n_basis : gp_n_basis
+            gp_z ~ filldist(Normal(0.0, 1.0), n_gp_terms)
+            spd_weights = hsgp_coefficients(
+                gp_n_basis, gp_boundary,
+                gp_alpha, rescaled_rho, gp_kernel, gp_matern_order
+            )
+            gp_f = hsgp_basis_matrix * (spd_weights .* gp_z)
+            # A stationary GP enters log Rt directly; a non-stationary one
+            # as the cumulative sum of daily increments starting from 0.
+            raw_path = gp_on == gp_R0 ? gp_f :
+                vcat([zero(eltype(gp_f))], cumsum(gp_f))
+            _hold_forward(raw_path, total_times)
+        else
+            zeros(total_times)
         end
+
+        bp_path = if bp_n > 0
+            bp_sd ~ truncated(Normal(0.0, 0.1); lower = 0.0)
+            bp_effects ~ filldist(Normal(0.0, bp_sd), bp_n)
+            bp_levels = vcat([zero(eltype(bp_effects))], cumsum(bp_effects))
+            [bp_levels[bps[t]] for t in 1:total_times]
+        else
+            zeros(total_times)
+        end
+
+        # Centre the paths over the observed window so that the mean of
+        # log Rt there is log(R_mean). The stationary GP is not centred.
+        log_intercept = log(R_mean)
+        if use_gp && gp_on != gp_R0
+            log_intercept -= mean(gp_path[1:n_non_horizon])
+        end
+        if bp_n > 0
+            log_intercept -= mean(bp_path[1:n_non_horizon])
+        end
+        log_R = log_intercept .+ gp_path .+ bp_path
+
+        # Prior on R[1]. The sampler moves on R_mean, whose positivity
+        # transform already contributes log(R_mean), so the Jacobian of the
+        # map to R[1] is log(R[1]) - log(R_mean).
+        Turing.@addlogprob! logpdf(rt_prior, exp(log_R[1])) +
+            log_R[1] - log(R_mean)
+
+        # ── Initial conditions (seeding) ─────────────────────────────
+        log_initial_infections ~ Normal(initial_infections_guess, 2.0)
+        growth = R_to_growth(exp(log_R[1]), gt_pmf)
+        if use_obs_scale
+            frac_observed ~ obs_scale_prior
+        end
+        log_seed_scale = use_obs_scale ?
+            log_initial_infections - log(frac_observed) :
+            log_initial_infections
+        initial_infections = [
+            exp(log_seed_scale + growth * (s - 1 - seeding_time))
+                for s in 1:seeding_time
+        ]
 
         R = exp.(log_R)
 
@@ -454,7 +500,7 @@ Generative process:
                         for j in 1:min(t - 1, gt_len)
                 )
                 use_pop = (pop_period == pop_all) ||
-                    (pop_period == pop_forecast && s > n_non_horizon)
+                    (pop_period == pop_forecast && s > pop_start)
                 if use_pop
                     susceptible = max(pop_floor, pop - cum_inf)
                     exp_adj = exp(-R[s] * infectiousness / susceptible)
@@ -481,7 +527,7 @@ Generative process:
         if use_gp
             gp_alpha ~ truncated(gp_alpha_prior; lower = 0.0)
             gp_rho ~ truncated(gp_ls_prior; lower = 0.0)
-            rescaled_rho = 2.0 * gp_rho / n_noise_terms
+            rescaled_rho = 2.0 * gp_rho / max(n_noise_terms - 1, 1)
             n_gp_terms = gp_kernel == periodic ? 2 * gp_n_basis : gp_n_basis
             gp_z ~ filldist(Normal(0.0, 1.0), n_gp_terms)
             spd_weights = hsgp_coefficients(
@@ -551,23 +597,33 @@ Generative process:
 
     # ── Observation scale (fraction reported) ────────────────────────
     if use_obs_scale
-        frac_observed ~ obs_scale_prior
+        if !use_rt
+            frac_observed ~ obs_scale_prior
+        end
         expected_reports = expected_reports .* frac_observed
     end
 
     # ── Truncation adjustment ─────────────────────────────────────
     if !isnothing(trunc_uncertain)
         trunc_params ~ arraydist(trunc_uncertain.param_priors)
-        trunc_dist = trunc_uncertain.constructor(trunc_params...)
-        trunc_pmf = discretise_ad(trunc_dist, Int(trunc_uncertain.max))
+        if trunc_prior_weight != 1
+            Turing.@addlogprob! (trunc_prior_weight - 1) *
+                _prior_logpdf(trunc_uncertain, trunc_params)
+        end
+        trunc_pmf = _uncertain_pmf(
+            [trunc_uncertain], [trunc_params], trunc_fixed_pmf
+        )
         trunc_rev_cmf = reverse(cumsum(trunc_pmf))
     end
 
+    # As in R, truncation only enters the likelihood: the reports returned
+    # stay untruncated, and only observed days are truncated.
+    obs_reports = expected_reports
     if !isnothing(trunc_rev_cmf)
         trunc_max = length(trunc_rev_cmf)
-        expected_reports = [
+        obs_reports = [
             let days_from_end = n_times - t
-                if days_from_end < trunc_max
+                if 0 <= days_from_end < trunc_max
                     expected_reports[t] * trunc_rev_cmf[trunc_max - days_from_end]
                 else
                     expected_reports[t]
@@ -588,6 +644,7 @@ Generative process:
         expected_reports = _apply_accumulation(
             expected_reports, accum_full, total_times
         )
+        obs_reports = _apply_accumulation(obs_reports, accum_full, total_times)
     end
 
     # ── Likelihood ───────────────────────────────────────────────────
@@ -597,12 +654,12 @@ Generative process:
         )
         φ = 1.0 / reporting_overdispersion^2
         for t in 1:n_times
-            μ = max(expected_reports[t], 1.0e-6)
+            μ = max(obs_reports[t], 1.0e-6)
             Turing.@addlogprob! obs_weight * _negbin2_logpmf(cases[t], μ, φ)
         end
     else  # poisson
         for t in 1:n_times
-            μ = max(expected_reports[t], 1.0e-6)
+            μ = max(obs_reports[t], 1.0e-6)
             Turing.@addlogprob! obs_weight * logpdf(Poisson(μ), cases[t])
         end
     end
@@ -783,44 +840,75 @@ function _truncate_obs(reports, rev_cmf, reconstruct::Bool)
     ]
 end
 
+"""
+    truncation_model(obs, obs_dist, trunc, trunc_fixed_pmf, family,
+                     dispersion_prior, noise_prior, likelihood, prior_weight)
+
+Turing model for `estimate_truncation()`, following R's
+`estimate_truncation.stan`. The most complete (last) snapshot is
+reconstructed without truncation, truncation is re-applied to map it onto
+each earlier snapshot, and the earlier snapshots are observed with negative
+binomial or Poisson noise around that, plus an additive `sigma`.
+
+`trunc` is the uncertain truncation distribution, or `nothing` when the
+truncation PMF `trunc_fixed_pmf` (from delay 0) is fixed.
+"""
 @model function truncation_model(
         obs::Matrix{Float64},
         obs_dist::Vector{Int},
-        max_trunc::Int,
-        meanlog_prior::Distribution,
-        sdlog_prior::Distribution
+        trunc::Union{UncertainDistribution, Nothing},
+        trunc_fixed_pmf::AbstractVector{Float64},
+        family::ObsFamily,
+        dispersion_prior::Distribution,
+        noise_prior::Distribution,
+        likelihood::Bool,
+        prior_weight::Float64
     )
     n_times, obs_sets = size(obs)
 
-    trunc_meanlog ~ meanlog_prior
-    trunc_sdlog ~ sdlog_prior
-    reporting_overdispersion ~ truncated(Normal(0.0, 1.0); lower = 0.0)
-    φ = 1.0 / sqrt(reporting_overdispersion)
-    sigma ~ truncated(Normal(0.0, 1.0); lower = 0.0)
-
-    # Discretise via double interval censoring — the same method used for
-    # delays, generation time and secondary observations across the package.
-    d = Distributions.LogNormal(trunc_meanlog, trunc_sdlog)
-    cd = CensoredDistributions.double_interval_censored(d; interval = 1, upper = max_trunc + 1)
-    trunc_pmf = [exp(logpdf(cd, k)) for k in 0:max_trunc]
-    trunc_pmf = trunc_pmf ./ sum(trunc_pmf)
+    trunc_pmf = if isnothing(trunc)
+        trunc_fixed_pmf
+    else
+        trunc_params ~ arraydist(trunc.param_priors)
+        if prior_weight != 1
+            Turing.@addlogprob! (prior_weight - 1) *
+                _prior_logpdf(trunc, trunc_params)
+        end
+        _uncertain_pmf([trunc], [trunc_params], trunc_fixed_pmf)
+    end
+    max_trunc = length(trunc_pmf) - 1
     trunc_rev_cmf = reverse(cumsum(trunc_pmf))
+
+    if family == negbin
+        reporting_overdispersion ~ truncated(dispersion_prior; lower = 0.0)
+        φ = 1.0 / reporting_overdispersion^2
+    end
+    sigma ~ truncated(noise_prior; lower = 0.0)
 
     # Reconstruct the most complete (last) snapshot without truncation, then
     # re-apply truncation to map it back onto each earlier snapshot.
     last_obs = _truncate_obs(obs[:, obs_sets], trunc_rev_cmf, true)
 
-    for i in 1:(obs_sets - 1)
-        end_t = n_times - obs_dist[i]
-        start_t = max(1, end_t - max_trunc)
-        expected = _truncate_obs(last_obs[start_t:end_t], trunc_rev_cmf, false) .+ sigma
-        for (j, idx) in enumerate(start_t:end_t)
-            μ = max(expected[j], 1.0e-6)
-            Turing.@addlogprob! _negbin2_logpmf(round(Int, obs[idx, i]), μ, φ)
+    if likelihood
+        for i in 1:(obs_sets - 1)
+            end_t = n_times - obs_dist[i]
+            start_t = max(1, end_t - max_trunc)
+            expected = _truncate_obs(
+                last_obs[start_t:end_t], trunc_rev_cmf, false
+            ) .+ sigma
+            for (j, idx) in enumerate(start_t:end_t)
+                μ = max(expected[j], 1.0e-6)
+                y = round(Int, obs[idx, i])
+                Turing.@addlogprob! family == negbin ?
+                    _negbin2_logpmf(y, μ, φ) : logpdf(Poisson(μ), y)
+            end
         end
     end
 
-    return (trunc_meanlog = trunc_meanlog, trunc_sdlog = trunc_sdlog)
+    return (
+        trunc_params = isnothing(trunc) ? Float64[] : trunc_params,
+        trunc_pmf = trunc_pmf,
+    )
 end
 
 # ── Model assembly (options → Turing model) ──────────────────────────────
@@ -839,7 +927,7 @@ function assemble_model(
         truncation::TruncOpts,
         rt::RtOpts,
         backcalc::BackcalcOpts,
-        gp::GPOpts,
+        gp::Union{GPOpts, Nothing},
         obs::ObsOpts,
         forecast::ForecastOpts
     )
@@ -851,38 +939,31 @@ function assemble_model(
     gt_uncertain = _extract_uncertain(generation_time.dist)
     delay_uncertain = _extract_uncertain(delays.dist)
 
-    # For fixed distributions, discretise now. For uncertain, provide a
-    # placeholder PMF (the model will recompute from sampled params).
-    # Generation time PMF: drop P(GT=0) since gt_pmf[s] weights
-    # infections[t-s] in the renewal equation (1-indexed).
-    gt_pmf = if isempty(gt_uncertain)
-        _drop_zero_delay(discretise(generation_time.dist).pmf)
-    else
-        # Placeholder PMF from prior means (model will recompute)
-        pmfs = [
-            discretise_ad(
-                ud.constructor([mean(p) for p in ud.param_priors]...),
-                Int(ud.max)
-            ) for ud in gt_uncertain
-        ]
-        reduce(_convolve_pmfs, pmfs)
-    end
+    # Fixed components are discretised now. With uncertain components the
+    # PMFs below are placeholders at the prior means; the model recomputes
+    # them from the sampled parameters, convolved with the fixed part.
+    # The generation time PMF drops P(GT = 0) because gt_pmf[s] weights
+    # infections[t - s] in the renewal equation.
+    gt_fixed_pmf = _fixed_pmf(generation_time.dist)
+    delay_fixed_pmf = _fixed_pmf(delays.dist)
+    gt_pmf = _drop_zero_delay(
+        _uncertain_pmf(
+            gt_uncertain, _prior_means.(gt_uncertain), gt_fixed_pmf
+        )
+    )
+    delay_pmf = _uncertain_pmf(
+        delay_uncertain, _prior_means.(delay_uncertain), delay_fixed_pmf
+    )
 
-    delay_pmf = if isempty(delay_uncertain)
-        discretise(delays.dist).pmf
-    else
-        pmfs = [
-            discretise_ad(
-                ud.constructor([mean(p) for p in ud.param_priors]...),
-                Int(ud.max)
-            ) for ud in delay_uncertain
-        ]
-        reduce(_convolve_pmfs, pmfs)
-    end
-
-    # Truncation: fixed, uncertain, or none
-    trunc_uncertain = truncation.dist isa UncertainDistribution ?
-        truncation.dist : nothing
+    # Truncation: fixed, uncertain, or none. Uncertain parts are sampled in
+    # the model and convolved with the fixed parts, as for the delays.
+    trunc_uncertain_parts = _extract_uncertain(truncation.dist)
+    length(trunc_uncertain_parts) <= 1 || throw(
+        ArgumentError("Only one uncertain truncation distribution is supported")
+    )
+    trunc_uncertain = isempty(trunc_uncertain_parts) ? nothing :
+        only(trunc_uncertain_parts)
+    trunc_fixed_pmf = _fixed_pmf(truncation.dist)
     trunc_rev_cmf = if trunc_uncertain !== nothing
         nothing  # model will compute from sampled params
     elseif truncation.dist isa Dirac && truncation.dist.value == 0.0
@@ -892,14 +973,25 @@ function assemble_model(
         reverse(cumsum(trunc_pmf))
     end
 
-    # Seeding time: max of generation time and total delay, at least 1
-    # Matches R: max(sum of delay means, max generation time)
-    seeding_time = max(length(gt_pmf) - 1, length(delay_pmf) - 1, 1)
+    # Seeding time as R's `get_seeding_time()`: the rounded sum of the delay
+    # means, but at least the maximum generation time (the length of
+    # `gt_pmf`, which starts at a delay of 1) and at least 1.
+    seeding_time = max(
+        round(Int, _delay_mean(delays.dist)), length(gt_pmf), 1
+    )
 
     # GP configuration
-    use_gp = gp.basis_prop > 0 && (rt.use_rt ? rt.rw == 0 : true)
+    # `gp = nothing` switches the Gaussian process off; a random walk on
+    # its own then needs `gp = nothing` as in R.
+    use_gp = gp !== nothing
+    gp = something(gp, gp_opts())
     stationary = rt.gp_on == gp_R0
     future_fixed = rt.future in (latest, estimate)
+    # Offset of the last estimated Rt from the end of the data, as `from` in
+    # R's `create_future_rt()`: 0 for `latest`, minus the hold-back for
+    # `estimate`.
+    fixed_offset = rt.future == estimate ?
+        -something(rt.fixed_from, seeding_time) : 0
     # Number of GP noise terms (matches Stan's setup_noise)
     noise_terms = if !use_gp
         0
@@ -908,10 +1000,10 @@ function assemble_model(
         total_times
     else
         nt = stationary ? total_times : total_times - 1
-        future_fixed ? nt - n_forecast + rt.fixed_from : nt
+        future_fixed ? nt - n_forecast + fixed_offset : nt
     end
-    gp_n_basis = use_gp ? max(1, round(Int, gp.basis_prop * noise_terms)) : 0
-    gp_boundary = gp.boundary_scale
+    gp_boundary, gp_n_basis = use_gp ? gp_basis_settings(gp, noise_terms) :
+        (1.5, 0)
 
     # Precompute HSGP basis on noise_terms dimensions
     # Periodic kernel uses cos/sin basis (2*n_basis columns)
@@ -922,9 +1014,6 @@ function assemble_model(
     else
         hsgp_basis(gp_n_basis, gp_boundary, noise_terms)
     end
-
-    # Random walk configuration
-    use_rw = rt.use_rt && rt.rw > 0
 
     # Day of week
     start_day = Dates.dayofweek(data.date[1])
@@ -953,22 +1042,24 @@ function assemble_model(
         nothing
     end
 
-    # Breakpoints: convert 0/1 indicator column to cumulative group indices
-    # bps[t] indexes into bp0 = [0; cumsum(bp_effects)] for t=1:total_times
-    has_breakpoints = any(data.breakpoints .> 0)
-    if has_breakpoints
-        bp_cumsum = cumsum(data.breakpoints) .+ 1  # +1 for 1-indexing into bp0
-        # Extend into forecast by holding last value
-        bps = if n_forecast > 0
-            vcat(bp_cumsum, fill(bp_cumsum[end], n_forecast))
-        else
-            bp_cumsum
+    # Breakpoints: bps[t] indexes the breakpoint levels
+    # [0; cumsum(bp_effects)] for t = 1:total_times. A random walk is a
+    # breakpoint every `rw` days, as in R's `create_rt_data()`.
+    bps = if rt.use_rt && rt.rw > 0
+        steps = [div(t, rt.rw) for t in 1:total_times]
+        if rt.future != project
+            max_bps = total_times - n_forecast + fixed_offset
+            if max_bps < total_times
+                steps[(max_bps + 1):end] .= steps[max_bps]
+            end
         end
-        bp_n = maximum(data.breakpoints |> cumsum)
+        steps
     else
-        bps = fill(1, total_times)
-        bp_n = 0
+        bp_cumsum = cumsum(data.breakpoints)
+        vcat(bp_cumsum, fill(bp_cumsum[end], n_forecast))
     end
+    bp_n = maximum(bps)
+    bps = bps .+ 1
 
     # Empirical prior on initial infections: log(mean(first 7 cases))
     # Matches Stan's initial_infections_guess
@@ -995,8 +1086,6 @@ function assemble_model(
         gp.matern_order,
         rt.gp_on,
         noise_terms,
-        use_rw,
-        rt.rw,
         obs.week_effect,
         obs.week_length,
         start_day,
@@ -1008,8 +1097,11 @@ function assemble_model(
         rt.pop_period,
         rt.pop_floor,
         n_times,  # n_non_horizon (observations period)
+        # Depletion for `pop_forecast` starts where Rt stops being
+        # estimated, as R's `ot - ht`.
+        n_times + fixed_offset,  # pop_start
         # Priors
-        rt.prior,
+        _positive_prior(rt.prior),
         gp.alpha,
         gp.ls,
         obs.dispersion,
@@ -1023,17 +1115,52 @@ function assemble_model(
         bps,
         shifted_cases,
         backcalc.prior,
-        # Prior weight: 1/n_obs when weight_prior=true, else 1.0
-        (generation_time.weight_prior || delays.weight_prior) ?
-            1.0 / n_times : 1.0
+        gt_fixed_pmf,
+        delay_fixed_pmf,
+        trunc_fixed_pmf,
+        generation_time.weight_prior ? Float64(n_times) : 1.0,
+        delays.weight_prior ? Float64(n_times) : 1.0,
+        truncation.weight_prior ? Float64(n_times) : 1.0
     )
 
     metadata = ModelMetadata(
         data.date, seeding_time, n_forecast,
-        gt_pmf, delay_pmf, rt, obs
+        gt_pmf, delay_pmf, rt, obs,
+        use_gp ? gp_ls_range(gp, noise_terms, gp_boundary, gp_n_basis) :
+            nothing,
+        gp_half_range(noise_terms)
     )
 
     return (model = model, metadata = metadata)
+end
+
+"""
+    check_gp_lengthscale(rho, metadata)
+
+Warn when the posterior median GP lengthscale `rho` falls outside the range
+the Hilbert space approximation represents accurately, as R's
+`check_gp_lengthscale()` does.
+"""
+function check_gp_lengthscale(rho::AbstractVector, metadata)
+    range = metadata.gp_ls_range
+    isnothing(range) && return nothing
+    ls_median = median(rho)
+    if ls_median + 0.01 * metadata.gp_half_range < range[1]
+        @warn "The posterior median GP lengthscale " *
+            "($(round(ls_median; sigdigits = 3)) days) is shorter than the " *
+            "$(round(range[1]; sigdigits = 3)) days the approximate GP can " *
+            "represent accurately. Increase `basis_prop` in `gp_opts()`, or " *
+            "use a lengthscale prior with more weight on shorter lengthscales."
+    end
+    if ls_median > range[2]
+        @warn "The posterior median GP lengthscale " *
+            "($(round(ls_median; sigdigits = 3)) days) is longer than the " *
+            "$(round(range[2]; sigdigits = 3)) days the approximate GP " *
+            "boundary supports. Increase `boundary_scale` in `gp_opts()`, " *
+            "or use a lengthscale prior with more weight on longer " *
+            "lengthscales."
+    end
+    return range
 end
 
 """
@@ -1050,9 +1177,23 @@ struct ModelMetadata
     delay_pmf::Vector{Float64}
     rt_opts::RtOpts
     obs_opts::ObsOpts
+    # Lengthscale range the GP approximation represents accurately, and the
+    # half-range of its time points; `nothing` without a GP.
+    gp_ls_range::Union{Nothing, Tuple{Float64, Float64}}
+    gp_half_range::Float64
 end
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+# R truncates the Rt prior to positive values (`T[0, ]`); a lognormal or
+# gamma prior is already positive.
+_positive_prior(d::Distribution) = minimum(d) < 0 ? truncated(d; lower = 0.0) : d
+
+# Extend `x` to length `n` by repeating its last value.
+function _hold_forward(x::AbstractVector, n::Int)
+    length(x) >= n && return x[1:n]
+    return vcat(x, fill(x[end], n - length(x)))
+end
 
 """
     _drop_zero_delay(pmf)
@@ -1116,6 +1257,45 @@ function R_to_growth(R, gt_pmf; newton_steps::Int = 2)
     end
     return r
 end
+
+# Log density of an uncertain distribution's parameter priors.
+_prior_logpdf(ud::UncertainDistribution, θ) =
+    sum(logpdf(p, θ[i]) for (i, p) in enumerate(ud.param_priors))
+
+_prior_means(ud::UncertainDistribution) = [mean(p) for p in ud.param_priors]
+
+# PMF (from delay 0) of the fixed components of a delay specification.
+_fixed_pmf(d::UncertainDistribution) = [1.0]
+function _fixed_pmf(d::CompositeDelay)
+    fixed = [c for c in d.components if !(c isa UncertainDistribution)]
+    isempty(fixed) && return [1.0]
+    return discretise(CompositeDelay(fixed)).pmf
+end
+_fixed_pmf(d) = discretise(d).pmf
+
+# PMF (from delay 0) of uncertain components at parameters `θs`,
+# convolved with the PMF of the fixed components.
+function _uncertain_pmf(uncertain, θs, fixed_pmf)
+    pmf = fixed_pmf
+    for (ud, θ) in zip(uncertain, θs)
+        pmf = _convolve_pmfs(pmf, discretise_ad(ud.constructor(θ...), Int(ud.max)))
+    end
+    return pmf
+end
+
+# Mean of a delay ignoring parameter uncertainty, as R's
+# `mean(delays, ignore_uncertainty = TRUE)`: uncertain parts at the mean of
+# each parameter prior, composites as the sum of their parts. R applies
+# parameter bounds separately from the prior, so a truncated prior counts
+# with the mean of the distribution it truncates.
+_delay_mean(d::Distribution) = mean(d)
+_delay_mean(d::NonParametricDist) = sum((0:(length(d.pmf) - 1)) .* d.pmf)
+_delay_mean(d::UncertainDistribution) = mean(
+    d.constructor(
+        [p isa Truncated ? mean(p.untruncated) : mean(p) for p in d.param_priors]...
+    )
+)
+_delay_mean(d::CompositeDelay) = sum(_delay_mean, d.components)
 
 """Extract UncertainDistribution components from any delay specification."""
 function _extract_uncertain(d::UncertainDistribution)

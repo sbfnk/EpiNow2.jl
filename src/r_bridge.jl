@@ -141,12 +141,13 @@ end
 
 function _r_bridge_gp_opts(
         ls::Distribution, alpha::Distribution;
-        basis_prop::Real, boundary_scale::Real,
+        basis_prop::Union{Nothing, Real}, boundary_scale::Union{Nothing, Real},
         kernel::AbstractString, matern_order::Real, w0::Real
     )
     return gp_opts(
-        basis_prop = Float64(basis_prop),
-        boundary_scale = Float64(boundary_scale),
+        basis_prop = isnothing(basis_prop) ? nothing : Float64(basis_prop),
+        boundary_scale = isnothing(boundary_scale) ? nothing :
+            Float64(boundary_scale),
         ls = ls,
         alpha = alpha,
         kernel = _r_bridge_gp_kernel(kernel),

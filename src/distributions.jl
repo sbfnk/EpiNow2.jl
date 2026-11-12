@@ -167,12 +167,16 @@ function Base.show(io::IO, d::CompositeDelay)
     return print(io, join(parts, " + "))
 end
 
-function Base.show(io::IO, ::MIME"text/plain", d::CompositeDelay)
-    println(io, "Composite distribution:")
+function _show_tree(io::IO, d::CompositeDelay; indent = 0)
+    println(io, "  "^indent, "Composite distribution:")
     for c in d.components
-        _show_tree(io, c; indent = 0)
+        _show_tree(io, c; indent = indent)
     end
     return
+end
+
+function Base.show(io::IO, ::MIME"text/plain", d::CompositeDelay)
+    return _show_tree(io, d)
 end
 
 # ── Operators ────────────────────────────────────────────────────────────
@@ -316,8 +320,8 @@ end
 """
     discretise_ad(d::Distribution, max_val::Int)
 
-Discretise a continuous distribution into a 1-indexed PMF
-(delay 1..max_val) using double interval censoring. AD-compatible
+Discretise a continuous distribution into a PMF over delays `0:max_val`
+using double interval censoring, normalised to sum to one. AD-compatible
 for use inside Turing `@model` functions.
 
 Uses CensoredDistributions.jl which supports ForwardDiff through
@@ -325,9 +329,7 @@ both LogNormal and Gamma distribution parameters.
 """
 function discretise_ad(d::Distribution, max_val::Int)
     cd = double_interval_censored(d; interval = 1, upper = max_val + 1)
-    # 0-indexed PMF from CensoredDistributions, then drop delay 0
-    pmf_full = [exp(logpdf(cd, k)) for k in 0:max_val]
-    pmf = pmf_full[2:end]
+    pmf = [exp(logpdf(cd, k)) for k in 0:max_val]
     return pmf ./ sum(pmf)
 end
 

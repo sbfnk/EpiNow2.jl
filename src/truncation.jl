@@ -13,6 +13,8 @@ Mirrors the `args` field of EpiNow2 R's v1.8 `epinowfit` S3 class.
 """
 struct EstimateTruncationArgs
     truncation::TruncOpts
+    obs::ObsOpts
+    noise::Distribution
     inference::InferenceOpts
     CrIs::Vector{Float64}
 end
@@ -25,14 +27,15 @@ Result of `estimate_truncation()`.
 struct EstimateTruncationResult
     fit::EpiNow2Fit
     args::EstimateTruncationArgs
-    dist::DelayDistribution
+    dist::Union{DelayDistribution, CompositeDelay}
     observations::Vector{EpiData}
     timing::Float64
 end
 
 """
-    estimate_truncation(data; truncation, inference, CrIs = [0.2, 0.5, 0.9],
-                        verbose = true)
+    estimate_truncation(data; truncation, obs = obs_opts(),
+                        noise = Normal(0, 1), inference,
+                        CrIs = [0.2, 0.5, 0.9], verbose = true)
 
 Estimate a right-truncation distribution from several snapshots of the same
 data taken at different times. Recent counts are incomplete in earlier
@@ -44,10 +47,14 @@ are complete, as a lognormal distribution.
   and `:confirm` columns. Snapshots that end later should be more complete.
 
 # Keyword Arguments
-- `truncation`: truncation options from [`trunc_opts`](@ref). Its
-  `meanlog_prior` and `sdlog_prior` set the priors on the lognormal
-  parameters, and the maximum truncation is taken from `dist` (default: a
-  lognormal with meanlog 0 and sdlog 1).
+- `truncation`: truncation options from [`trunc_opts`](@ref), usually with an
+  [`UncertainDistribution`](@ref) whose parameters are estimated. Defaults to
+  a lognormal with `meanlog ~ Normal(0, 1)`, `sdlog ~ Normal(1, 1)` and a
+  maximum of 10 days, as in R.
+- `obs`: observation model options from [`obs_opts`](@ref): the `family`,
+  the `dispersion` prior and whether to evaluate the `likelihood`.
+- `noise`: prior on the additive noise `sigma`, truncated to be positive
+  (default `Normal(0, 1)`).
 - `inference`: inference options from [`inference_opts`](@ref).
 - `CrIs`: credible intervals to summarise (default `[0.2, 0.5, 0.9]`).
 - `verbose`: print progress messages (default `true`).
@@ -55,7 +62,8 @@ are complete, as a lognormal distribution.
 # Returns
 An `EstimateTruncationResult` whose `dist` field holds the estimated
 truncation distribution, to pass to [`trunc_opts`](@ref) for
-[`epinow`](@ref) or [`estimate_infections`](@ref).
+[`epinow`](@ref) or [`estimate_infections`](@ref). For a composite
+`truncation`, the fixed parts are kept alongside the fitted one.
 
 ```@example estimate_truncation
 using EpiNow2, DataFrames
@@ -78,7 +86,15 @@ fit.dist
 """
 function estimate_truncation(
         data::Vector{DataFrame};
-        truncation::TruncOpts = trunc_opts(LogNormal(0.0, 1.0)),
+        truncation::TruncOpts = trunc_opts(
+            UncertainDistribution(
+                (meanlog, sdlog) -> LogNormal(meanlog, sdlog),
+                [Normal(0.0, 1.0), truncated(Normal(1.0, 1.0); lower = 0.0)],
+                10.0
+            )
+        ),
+        obs::ObsOpts = obs_opts(),
+        noise::Distribution = Normal(0.0, 1.0),
         inference::InferenceOpts = inference_opts(),
         CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
         verbose::Bool = true
@@ -86,36 +102,28 @@ function estimate_truncation(
     length(data) >= 2 || throw(ArgumentError("Need at least 2 snapshots"))
 
     # Sort snapshots by end date so the most complete one is last (the
-    # reconstruction reference), and align all snapshots on a shared time axis
-    # starting at the earliest observed date.
+    # reconstruction reference); `_truncation_obs` then aligns them on a
+    # shared time axis starting at the latest snapshot start date.
     sorted_snaps = sort([sort(df, :date) for df in data]; by = s -> s.date[end])
     epi_datas = [EpiData(df) for df in sorted_snaps]
 
-    common_start = minimum(s.date[1] for s in sorted_snaps)
-    latest_end = maximum(s.date[end] for s in sorted_snaps)
-    n_times = Dates.value(latest_end - common_start) + 1
+    trunc_uncertain = _extract_uncertain(truncation.dist)
+    length(trunc_uncertain) <= 1 || throw(
+        ArgumentError("Only one uncertain truncation distribution is supported")
+    )
+    trunc = isempty(trunc_uncertain) ? nothing : only(trunc_uncertain)
+    trunc_fixed_pmf = _fixed_pmf(truncation.dist)
+    max_trunc = length(trunc_fixed_pmf) - 1 +
+        (isnothing(trunc) ? 0 : Int(trunc.max))
 
-    obs = zeros(Float64, n_times, length(sorted_snaps))
-    for (i, s) in enumerate(sorted_snaps)
-        for (d, c) in zip(s.date, s.confirm)
-            obs[Dates.value(d - common_start) + 1, i] = Float64(c)
-        end
-    end
-    obs_dist = [Dates.value(latest_end - s.date[end]) for s in sorted_snaps]
-
-    max_trunc = if truncation.dist isa UncertainDistribution
-        Int(truncation.dist.max)
-    elseif truncation.dist isa Distribution && !(truncation.dist isa Dirac)
-        min(30, Int(ceil(quantile(truncation.dist, 0.999))))
-    else
-        15
-    end
+    obs_matrix, obs_dist = _truncation_obs(sorted_snaps, max_trunc)
 
     verbose && @info "Estimating truncation..." n_snapshots = length(data) max_trunc
 
     model = truncation_model(
-        obs, obs_dist, max_trunc,
-        truncation.meanlog_prior, truncation.sdlog_prior
+        obs_matrix, obs_dist, trunc, trunc_fixed_pmf,
+        obs.family, obs.dispersion, noise, obs.likelihood,
+        truncation.weight_prior ? Float64(size(obs_matrix, 1)) : 1.0
     )
 
     metadata = TruncationMetadata(
@@ -129,15 +137,47 @@ function estimate_truncation(
 
     verbose && @info "Truncation estimation complete" seconds = round(elapsed, digits = 1)
 
-    fitted_dist = _extract_truncation_dist(fit)
+    fitted_dist = _extract_truncation_dist(fit, truncation.dist, trunc)
 
-    args = EstimateTruncationArgs(truncation, inference, CrIs)
+    args = EstimateTruncationArgs(truncation, obs, noise, inference, CrIs)
     return EstimateTruncationResult(fit, args, fitted_dist, epi_datas, elapsed)
 end
 
-function _extract_truncation_dist(fit::EpiNow2Fit)
-    gqs = fit.generated_quantities
-    meanlog_samples = [gq.trunc_meanlog for gq in gqs]
-    sdlog_samples = [gq.trunc_sdlog for gq in gqs]
-    return LogNormal(mean(meanlog_samples), mean(sdlog_samples))
+# Snapshots aligned on a shared daily axis, one column each (zero where a
+# snapshot has no data), and how many days each snapshot ends before the
+# latest. As R's `prepare_truncation_obs()`, the axis starts on the latest
+# snapshot start date, and rows from before the window the truncation can
+# affect are dropped: only the last `max_trunc` days of the earliest-ending
+# snapshot, and the days after it, are kept.
+function _truncation_obs(sorted_snaps, max_trunc::Int)
+    common_start = maximum(s.date[1] for s in sorted_snaps)
+    latest_end = maximum(s.date[end] for s in sorted_snaps)
+    n_times = Dates.value(latest_end - common_start) + 1
+
+    obs_matrix = zeros(Float64, n_times, length(sorted_snaps))
+    for (i, s) in enumerate(sorted_snaps)
+        for (d, c) in zip(s.date, s.confirm)
+            d >= common_start || continue
+            obs_matrix[Dates.value(d - common_start) + 1, i] = Float64(c)
+        end
+    end
+    obs_dist = [Dates.value(latest_end - s.date[end]) for s in sorted_snaps]
+
+    n_missing_first = n_times - count(>=(common_start), sorted_snaps[1].date)
+    obs_start = max(n_times - max_trunc - n_missing_first + 1, 1)
+    return obs_matrix[obs_start:end, :], obs_dist
+end
+
+# The fitted truncation: the uncertain part at its posterior mean
+# parameters, together with any fixed parts it was fitted alongside.
+function _extract_truncation_dist(fit::EpiNow2Fit, dist, trunc)
+    isnothing(trunc) && return dist
+    params = reduce(hcat, [gq.trunc_params for gq in fit.generated_quantities])
+    fitted = trunc.constructor(vec(mean(params; dims = 2))...)
+    dist isa CompositeDelay || return fitted
+    return CompositeDelay(
+        DelayDistribution[
+            c isa UncertainDistribution ? fitted : c for c in dist.components
+        ]
+    )
 end
