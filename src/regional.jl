@@ -6,49 +6,54 @@ struct RegionalEpinowResult
 end
 
 """
-    regional_epinow(data; ..., kwargs...)
+    regional_epinow(data; non_zero_points = 7, target_folder = nothing,
+                    verbose = false, kwargs...)
 
-Run `epinow()` across multiple regions in parallel.
+Run [`epinow`](@ref) for each region in the data, in parallel across Julia
+threads (start Julia with `--threads` to use more than one). A region whose
+fit fails is reported with a warning and does not stop the others.
 
 # Arguments
-- `data::DataFrame` — must contain `:date`, `:confirm`, and `:region` columns
-- All other keyword arguments are passed to `epinow()` for each region
+- `data`: a `DataFrame` with `:date`, `:confirm` and `:region` columns.
 
-# Parallelism
-Uses Julia's built-in threading (`Threads.@threads`) or `Distributed`
-for multi-region parallelism. Set `JULIA_NUM_THREADS` or add workers.
+# Keyword Arguments
+- `non_zero_points`: minimum number of days with non-zero cases for a region
+  to be fitted (default 7); regions with fewer are skipped.
+- `target_folder`: directory in which to save each region's results, one
+  subdirectory per region; `nothing` (default) saves nothing. Read them back
+  with [`get_regional_results`](@ref).
+- `verbose`: print progress messages (default `false`).
+- `kwargs...`: passed to [`epinow`](@ref) for every region, e.g.
+  `generation_time`, `delays` or `inference`.
 
 # Returns
-`RegionalEpinowResult` with per-region results and cross-region summaries.
+A `RegionalEpinowResult` whose `regional` field maps each region name to
+its `EpinowResult` (or the error it raised). `summary(result)` gives the
+latest estimates of every region with the probability that Rt is
+decreasing.
 
-# Example
-```julia
-data = DataFrame(
-    date = repeat(dates, 3),
-    confirm = [cases_a; cases_b; cases_c],
-    region = [fill("A", n); fill("B", n); fill("C", n)]
+```@example regional_epinow
+using EpiNow2, DataFrames
+cases = example_confirmed()[1:30, :]
+data = vcat(
+    insertcols(cases, :region => "north"), insertcols(cases, :region => "south")
 )
-
 result = regional_epinow(
-    data,
-    generation_time = gt_opts(LogNormal(1.6, 0.5)),
-    delays = delay_opts(LogNormal(0.5, 0.5))
+    data;
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false)
 )
-
-# Cross-region summary
 summary(result)
-
-# Individual region
-result.regional[:A]
 ```
 """
 function regional_epinow(
-    data::DataFrame;
-    non_zero_points::Int = 7,
-    target_folder::Union{String, Nothing} = nothing,
-    verbose::Bool = false,
-    kwargs...
-)
+        data::DataFrame;
+        non_zero_points::Int = 7,
+        target_folder::Union{String, Nothing} = nothing,
+        verbose::Bool = false,
+        kwargs...
+    )
     :region in propertynames(data) || throw(ArgumentError("Data must have a :region column"))
 
     regions = unique(data.region)
@@ -77,12 +82,12 @@ function regional_epinow(
             t0 = time()
             result = epinow(
                 select(region_data, Not(:region));
-                verbose=false, kwargs...
+                verbose = false, kwargs...
             )
             region_results[i] = result
             region_timings[i] = time() - t0
         catch e
-            @warn "Region $region failed" exception=e
+            @warn "Region $region failed" exception = e
             region_results[i] = e
         end
     end
@@ -104,7 +109,7 @@ function regional_epinow(
         end
     end
 
-    RegionalEpinowResult(results, timings)
+    return RegionalEpinowResult(results, timings)
 end
 
 function Base.summary(result::RegionalEpinowResult)
@@ -113,7 +118,7 @@ function Base.summary(result::RegionalEpinowResult)
     rows = DataFrame[]
     for (region, res) in result.regional
         res isa Exception && continue
-        s = summary(res.estimates; type=:snapshot)
+        s = summary(res.estimates; type = :snapshot)
         s[!, :region] .= region
 
         # Add probability of decrease and change category for Rt
@@ -124,5 +129,5 @@ function Base.summary(result::RegionalEpinowResult)
         push!(rows, s)
     end
     isempty(rows) && return DataFrame()
-    vcat(rows...)
+    return vcat(rows...)
 end

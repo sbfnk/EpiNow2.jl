@@ -1,5 +1,6 @@
 name = "EpiNow2"
 uuid = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
+authors = ["Sebastian Funk <sebastian.funk@lshtm.ac.uk>"]
 version = "0.1.0"
 
 [deps]
@@ -33,20 +34,20 @@ CSV = "0.10"
 CairoMakie = "0.15"
 CensoredDistributions = "0.2"
 DataFrames = "1.6"
-Distributions = "0.25"
+Dates = "1"
+Distributions = "0.25.117"
 FlexiChains = "0.6"
+LinearAlgebra = "1"
 LogDensityProblems = "2"
 Mooncake = "0.5.24"
-PrecompileTools = "1.3.3"
+PrecompileTools = "1"
+Random = "1"
 ReverseDiff = "1"
 SpecialFunctions = "2"
+Statistics = "~1.10, 1.11.1"
 Tables = "1.12.1"
 Turing = "0.44.3, 0.45, 0.46, 0.47, 0.48, 0.49"
 julia = "1.10"
 
-[extras]
-CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["CairoMakie", "Test"]
+[workspace]
+projects = ["test", "docs"]

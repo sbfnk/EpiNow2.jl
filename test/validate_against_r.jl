@@ -31,7 +31,7 @@ function load_reference(test_name)
     rt = filter(r -> r.type != "forecast", rt)
     infections = filter(r -> r.type != "forecast", infections)
 
-    (input=input, rt=rt, infections=infections)
+    return (input = input, rt = rt, infections = infections)
 end
 
 """
@@ -40,7 +40,7 @@ end
 Compare Julia and R posterior summaries. Uses relative tolerance on medians.
 Returns a NamedTuple with comparison metrics.
 """
-function compare_summaries(jl_df, r_df, variable; rtol=0.3)
+function compare_summaries(jl_df, r_df, variable; rtol = 0.3)
     # Align by date
     n = min(nrow(jl_df), nrow(r_df))
     jl = jl_df[1:n, :]
@@ -53,7 +53,7 @@ function compare_summaries(jl_df, r_df, variable; rtol=0.3)
     corr = cor(jl_med, r_med)
 
     # Relative error (median across time points)
-    rel_errors = abs.(jl_med .- r_med) ./ max.(abs.(r_med), 1e-6)
+    rel_errors = abs.(jl_med .- r_med) ./ max.(abs.(r_med), 1.0e-6)
     median_rel_error = median(rel_errors)
     max_rel_error = maximum(rel_errors)
 
@@ -67,98 +67,98 @@ function compare_summaries(jl_df, r_df, variable; rtol=0.3)
         (r_med .>= jl.lower_90) .& (r_med .<= jl.upper_90)
     ) / n
 
-    (
-        variable=variable,
-        n_times=n,
-        correlation=corr,
-        median_rel_error=median_rel_error,
-        max_rel_error=max_rel_error,
-        r_ci_contains_jl=r_contains_jl,
-        jl_ci_contains_r=jl_contains_r
+    return (
+        variable = variable,
+        n_times = n,
+        correlation = corr,
+        median_rel_error = median_rel_error,
+        max_rel_error = max_rel_error,
+        r_ci_contains_jl = r_contains_jl,
+        jl_ci_contains_r = jl_contains_r,
     )
 end
 
 # ── Run Julia models matching the R reference configurations ─────────────
 
 function run_julia_test1(data)
-    estimate_infections(
+    return estimate_infections(
         data;
         generation_time = gt_opts(Dirac(1.0)),
         delays = delay_opts(Dirac(0.0)),
-        obs = obs_opts(week_effect=false),
+        obs = obs_opts(week_effect = false),
         rt = rt_opts(),
-        gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
-        forecast = forecast_opts(horizon=7),
+        gp = gp_opts(basis_prop = 0.2, boundary_scale = 1.5),
+        forecast = forecast_opts(horizon = 7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=1, seed=42, progress=false
+            samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
-        verbose=false
+        verbose = false
     )
 end
 
 function run_julia_test2(data)
-    estimate_infections(
+    return estimate_infections(
         data;
         generation_time = gt_opts(LogNormal(1.6, 0.5)),
         delays = delay_opts(Dirac(0.0)),
-        obs = obs_opts(week_effect=false),
+        obs = obs_opts(week_effect = false),
         rt = rt_opts(),
-        gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
-        forecast = forecast_opts(horizon=7),
+        gp = gp_opts(basis_prop = 0.2, boundary_scale = 1.5),
+        forecast = forecast_opts(horizon = 7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=1, seed=42, progress=false
+            samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
-        verbose=false
+        verbose = false
     )
 end
 
 function run_julia_test3(data)
-    estimate_infections(
+    return estimate_infections(
         data;
         generation_time = gt_opts(LogNormal(1.6, 0.5)),
         delays = delay_opts(LogNormal(0.5, 0.5)),
-        obs = obs_opts(week_effect=false),
+        obs = obs_opts(week_effect = false),
         rt = rt_opts(),
-        gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
-        forecast = forecast_opts(horizon=7),
+        gp = gp_opts(basis_prop = 0.2, boundary_scale = 1.5),
+        forecast = forecast_opts(horizon = 7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=1, seed=42, progress=false
+            samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
-        verbose=false
+        verbose = false
     )
 end
 
 function run_julia_test4(data)
-    estimate_infections(
+    return estimate_infections(
         data;
         generation_time = gt_opts(LogNormal(1.6, 0.5)),
         delays = delay_opts(LogNormal(0.5, 0.5)),
-        obs = obs_opts(week_effect=true),
+        obs = obs_opts(week_effect = true),
         rt = rt_opts(),
-        gp = gp_opts(basis_prop=0.2, boundary_scale=1.5),
-        forecast = forecast_opts(horizon=7),
+        gp = gp_opts(basis_prop = 0.2, boundary_scale = 1.5),
+        forecast = forecast_opts(horizon = 7),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=1, seed=42, progress=false
+            samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
-        verbose=false
+        verbose = false
     )
 end
 
 function run_julia_secondary(data)
-    estimate_secondary(
+    return estimate_secondary(
         data;
         secondary = secondary_opts(),  # incidence (default), matches R
-        delays = delay_opts(discretise(LogNormal(1.6, 0.5); max=14)),
+        delays = delay_opts(discretise(LogNormal(1.6, 0.5); max = 14)),
         obs = obs_opts(
             family = poisson,
             week_effect = false,
-            scale = truncated(Normal(0.3, 0.1); lower=0.0)
+            scale = truncated(Normal(0.3, 0.1); lower = 0.0)
         ),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=1, seed=42, progress=false
+            samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
-        burn_in=14,
-        verbose=false
+        burn_in = 14,
+        verbose = false
     )
 end
 
@@ -167,17 +167,17 @@ function run_julia_truncation(snapshots)
     trunc_dist = EpiNow2.UncertainDistribution(
         (m, s) -> LogNormal(m, s), [Normal(0.0, 1.0), Normal(1.0, 1.0)], 10.0
     )
-    estimate_truncation(
+    return estimate_truncation(
         snapshots;
         truncation = trunc_opts(
             trunc_dist;
             meanlog_prior = Normal(0.0, 1.0),
-            sdlog_prior = truncated(Normal(1.0, 1.0); lower=0.0)
+            sdlog_prior = truncated(Normal(1.0, 1.0); lower = 0.0)
         ),
         inference = inference_opts(
-            samples=1000, warmup=500, chains=1, seed=42, progress=false
+            samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
-        verbose=false
+        verbose = false
     )
 end
 
@@ -186,7 +186,7 @@ end
 function run_validation()
     if !isdir(REFDIR)
         @warn "Reference directory not found at $REFDIR. " *
-              "Run `Rscript test/generate_r_reference.R` first."
+            "Run `Rscript test/generate_r_reference.R` first."
         return
     end
 
@@ -197,7 +197,7 @@ function run_validation()
         ("test4", "Full model with week effect", run_julia_test4),
     ]
 
-    @testset "Numerical validation against R" begin
+    return @testset "Numerical validation against R" begin
         for (name, description, runner) in tests
             ref_rt_path = joinpath(REFDIR, "$(name)_rt.csv")
             if !isfile(ref_rt_path)
@@ -216,20 +216,20 @@ function run_validation()
             # Compare Rt
             rt_comp = compare_summaries(result.rt, ref.rt, "Rt")
             println("\nRt comparison:")
-            println("  Correlation:        $(round(rt_comp.correlation, digits=3))")
-            println("  Median rel. error:  $(round(rt_comp.median_rel_error, digits=3))")
-            println("  Max rel. error:     $(round(rt_comp.max_rel_error, digits=3))")
-            println("  R CI contains Jl:   $(round(rt_comp.r_ci_contains_jl, digits=2))")
-            println("  Jl CI contains R:   $(round(rt_comp.jl_ci_contains_r, digits=2))")
+            println("  Correlation:        $(round(rt_comp.correlation, digits = 3))")
+            println("  Median rel. error:  $(round(rt_comp.median_rel_error, digits = 3))")
+            println("  Max rel. error:     $(round(rt_comp.max_rel_error, digits = 3))")
+            println("  R CI contains Jl:   $(round(rt_comp.r_ci_contains_jl, digits = 2))")
+            println("  Jl CI contains R:   $(round(rt_comp.jl_ci_contains_r, digits = 2))")
 
             # Compare infections
             inf_comp = compare_summaries(result.infections, ref.infections, "infections")
             println("\nInfections comparison:")
-            println("  Correlation:        $(round(inf_comp.correlation, digits=3))")
-            println("  Median rel. error:  $(round(inf_comp.median_rel_error, digits=3))")
-            println("  Max rel. error:     $(round(inf_comp.max_rel_error, digits=3))")
-            println("  R CI contains Jl:   $(round(inf_comp.r_ci_contains_jl, digits=2))")
-            println("  Jl CI contains R:   $(round(inf_comp.jl_ci_contains_r, digits=2))")
+            println("  Correlation:        $(round(inf_comp.correlation, digits = 3))")
+            println("  Median rel. error:  $(round(inf_comp.median_rel_error, digits = 3))")
+            println("  Max rel. error:     $(round(inf_comp.max_rel_error, digits = 3))")
+            println("  R CI contains Jl:   $(round(inf_comp.r_ci_contains_jl, digits = 2))")
+            println("  Jl CI contains R:   $(round(inf_comp.jl_ci_contains_r, digits = 2))")
 
             @testset "$description" begin
                 # Rt: median relative error < 30% (stable across runs)
@@ -272,10 +272,10 @@ function run_validation()
             r_w = mean(r_pred.upper_90[1:n] .- r_pred.lower_90[1:n])
             ci_width_ratio = jl_w / r_w
             println("\nSecondary (posterior predictive) comparison:")
-            println("  Correlation:        $(round(sec_comp.correlation, digits=3))")
-            println("  Median rel. error:  $(round(sec_comp.median_rel_error, digits=3))")
-            println("  Max rel. error:     $(round(sec_comp.max_rel_error, digits=3))")
-            println("  90% CI width ratio: $(round(ci_width_ratio, digits=3)) (Jl/R)")
+            println("  Correlation:        $(round(sec_comp.correlation, digits = 3))")
+            println("  Median rel. error:  $(round(sec_comp.median_rel_error, digits = 3))")
+            println("  Max rel. error:     $(round(sec_comp.max_rel_error, digits = 3))")
+            println("  90% CI width ratio: $(round(ci_width_ratio, digits = 3)) (Jl/R)")
 
             @testset "estimate_secondary" begin
                 # The expected secondary series tracks scaled+delayed primary,
@@ -303,7 +303,7 @@ function run_validation()
             tinp.date = Date.(tinp.date)
             snapshots = [
                 select(filter(r -> r.snapshot == i, tinp), :date, :confirm)
-                for i in sort(unique(tinp.snapshot))
+                    for i in sort(unique(tinp.snapshot))
             ]
 
             r_params = CSV.read(trunc_param_path, DataFrame)
@@ -320,8 +320,8 @@ function run_validation()
             ml_err = abs(jl_meanlog - r_meanlog) / abs(r_meanlog)
             sl_err = abs(jl_sdlog - r_sdlog) / abs(r_sdlog)
             println("\nTruncation distribution comparison:")
-            println("  meanlog: Julia $(round(jl_meanlog, digits=3)) vs R $(round(r_meanlog, digits=3)) (rel err $(round(ml_err, digits=3)))")
-            println("  sdlog:   Julia $(round(jl_sdlog, digits=3)) vs R $(round(r_sdlog, digits=3)) (rel err $(round(sl_err, digits=3)))")
+            println("  meanlog: Julia $(round(jl_meanlog, digits = 3)) vs R $(round(r_meanlog, digits = 3)) (rel err $(round(ml_err, digits = 3)))")
+            println("  sdlog:   Julia $(round(jl_sdlog, digits = 3)) vs R $(round(r_sdlog, digits = 3)) (rel err $(round(sl_err, digits = 3)))")
 
             @testset "estimate_truncation" begin
                 # Julia replicates R's truncation algorithm (latent

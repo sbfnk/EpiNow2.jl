@@ -1,0 +1,20 @@
+# PACKAGE-OWNED — scaffold writes this once and never overwrites it.
+name = "ADFixtures"
+uuid = "a4d4e52d-27b0-4ae9-bfb9-48ccee6e83bd"
+authors = ["Sebastian Funk"]
+version = "0.1.0"
+
+[deps]
+ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
+DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
+DifferentiationInterfaceTest = "a82114a7-5aa3-49a8-9643-716bb13727a3"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+DynamicPPL = "366bfd00-2699-11ea-058f-f148b4cae6d8"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+LogDensityProblems = "6fdf6af0-433a-55f7-b3ed-c6c6e0b8df7c"
+Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
+ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
+EpiNow2 = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
+
+[sources]
+EpiNow2 = {path = "../.."}

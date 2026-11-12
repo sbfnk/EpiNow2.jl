@@ -7,42 +7,49 @@ A Julia implementation of the EpiNow2 methodology, providing an opinionated,
 batteries-included interface for Rt estimation using Turing.jl for inference.
 
 # Quick start
-```julia
+```@example EpiNow2
 using EpiNow2
-
 result = epinow(
-    data,
-    generation_time = gt_opts(LogNormal(1.6, 0.5)),
-    delays = delay_opts(LogNormal(0.5, 0.5))
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(
+        discretise(example_incubation_period() + example_reporting_delay())
+    ),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
 )
 summary(result)
-plot(result)
 ```
 """
 module EpiNow2
 
-using ADTypes
-using CSV
-using CensoredDistributions
-using Dates
-using DataFrames
-using Distributions
-using LinearAlgebra
+using ADTypes: ADTypes, AutoForwardDiff, AutoMooncake, AutoReverseDiff
+using CSV: CSV
+using CensoredDistributions: CensoredDistributions, double_interval_censored,
+    ExponentiallyTilted
+using DataFrames: DataFrames, DataFrame, Not, combine, groupby, innerjoin,
+    insertcols!, nrow, select
+using Dates: Dates, Date, Day
+using Distributions: Distributions, Beta, Dirac, Dirichlet, Distribution,
+    Exponential, Gamma, LogNormal, NegativeBinomial, Normal, Poisson,
+    Truncated, Uniform, Weibull, fit, logpdf, params, pdf, scale, shape,
+    truncated
 using FlexiChains: FlexiChains, VNChain
-using Mooncake
-using PrecompileTools
-using Random
-using ReverseDiff
+using LinearAlgebra: LinearAlgebra
+using Mooncake: Mooncake
+using PrecompileTools: @compile_workload, @setup_workload
+using Random: Random
+using ReverseDiff: ReverseDiff
 using SpecialFunctions: loggamma, besseli
-using Statistics
-using Turing
+using Statistics: Statistics, mean, median, quantile, std
+using Turing: Turing, @model, @varname, MCMCThreads, NUTS, arraydist, filldist
 
 # ── AD backends (re-exported from ADTypes for convenience in inference_opts) ─
 export AutoForwardDiff, AutoReverseDiff, AutoMooncake
 
 # ── Distribution system ────────────────────────────────────────────────
 export NonParametricDist, UncertainDistribution, DelayDistribution,
-       CompositeDelay
+    CompositeDelay
 export discretise, convolve_pmfs
 
 # ── Enums ──────────────────────────────────────────────────────────────
@@ -57,26 +64,26 @@ export SecondaryType, incidence, prevalence
 
 # ── Options ─────────────────────────────────────────────────────────────
 export gt_opts, delay_opts, trunc_opts, rt_opts, gp_opts, obs_opts,
-       backcalc_opts, forecast_opts, inference_opts, secondary_opts
+    backcalc_opts, forecast_opts, inference_opts, secondary_opts
 
 # ── Main inference functions ────────────────────────────────────────────
 export epinow, estimate_infections, estimate_secondary,
-       estimate_truncation, regional_epinow, example_confirmed,
-       simulate_secondary, forecast_secondary,
-       example_generation_time, example_incubation_period,
-       example_reporting_delay
+    estimate_truncation, regional_epinow, example_confirmed,
+    simulate_secondary, forecast_secondary,
+    example_generation_time, example_incubation_period,
+    example_reporting_delay
 
 # ── Accessors ───────────────────────────────────────────────────────────
 export get_samples, get_predictions, get_parameters, get_imputed_reports
 
 # ── Utilities ──────────────────────────────────────────────────────────
 export R_to_growth, growth_to_R, map_prob_change, prob_decrease,
-       simulate_infections, forecast_infections, opts_list,
-       estimate_dist, bootstrapped_dist_fit,
-       get_regional_results,
-       convert_to_logmean, convert_to_logsd,
-       add_breakpoints, filter_leading_zeros, fill_missing,
-       calc_CrI, calc_CrIs, calc_summary_stats, calc_summary_measures
+    simulate_infections, forecast_infections, opts_list,
+    estimate_dist, bootstrapped_dist_fit,
+    get_regional_results,
+    convert_to_logmean, convert_to_logsd,
+    add_breakpoints, filter_leading_zeros, fill_missing,
+    calc_CrI, calc_CrIs, calc_summary_stats, calc_summary_measures
 
 include("distributions.jl")
 include("options.jl")
@@ -92,9 +99,70 @@ include("utilities.jl")
 include("estimate_dist.jl")
 include("r_bridge.jl")
 
-# Stubs for plotting functions (implemented by CairoMakie extension)
+"""
+    report_plots(result; CrI = 0.9, forecast_date = nothing)
+
+Plot the estimates of a fitted model, one figure per quantity: infections,
+reported cases (with the observed data), Rt and growth rate. Requires
+CairoMakie to be loaded.
+
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `CrI`: the credible interval to shade (default 0.9).
+- `forecast_date`: date separating estimates from forecasts; `nothing`
+  (default) uses the last date of the data.
+
+# Returns
+A `Dict` from `:infections`, `:reports`, `:rt` and `:growth_rate` to a
+`Figure`.
+
+```@example report_plots
+using EpiNow2, CairoMakie
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+report_plots(fit)[:rt]
+```
+"""
 function report_plots end
+
+"""
+    plot_summary(result; CrI = 0.9, forecast_date = nothing)
+
+Plot Rt and reported cases (with the observed data) of a fitted model side
+by side in one figure. Requires CairoMakie to be loaded.
+
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `CrI`: the credible interval to shade (default 0.9).
+- `forecast_date`: date separating estimates from forecasts; `nothing`
+  (default) uses the last date of the data.
+
+# Returns
+A `Figure`.
+
+```@example plot_summary
+using EpiNow2, CairoMakie
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+plot_summary(fit)
+```
+"""
 function plot_summary end
+
 export report_plots, plot_summary
 
 # ── Precompile workload ───────────────────────────────────────────────────
