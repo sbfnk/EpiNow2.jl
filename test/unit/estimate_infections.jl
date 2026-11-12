@@ -162,7 +162,7 @@ end
     @test result isa EpiNow2.EstimateInfectionsResult
     @test nrow(result.rt) == 30
     # A breakpoint every 7 days over 30 days gives 4 random walk steps
-    @test count(n -> startswith(string(n), "bp_effects"), names(result.fit.chain)) == 4
+    @test all(==(4) ∘ length, result.fit.chain[:bp_effects])
 end
 
 @testitem "log Rt is centred on R_mean over the observed window" setup = [TestSetup] begin

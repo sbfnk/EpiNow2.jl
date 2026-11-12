@@ -91,7 +91,7 @@ end
     )
     @test result isa EpiNow2.EstimateDistResult
     # `samples` is the total number of draws kept, as for the other models.
-    @test size(result.chain, 1) * size(result.chain, 3) == 200
+    @test size(result.chain, 1) * size(result.chain, 2) == 200
     @test result.fitted isa UncertainDistribution
     @test length(result.fitted.param_priors) == 2
     # Posterior mean of meanlog should land near the truth (1.5).

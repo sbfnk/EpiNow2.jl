@@ -60,7 +60,7 @@ end
         verbose = false
     )
     @test result.dist isa Gamma
-    @test !(:reporting_overdispersion in names(result.fit.chain))
+    @test isnothing(EpiNow2._chain_vector(result.fit, :reporting_overdispersion))
 end
 
 @testitem "estimate_truncation keeps the fixed part of a composite" setup = [TestSetup] begin
