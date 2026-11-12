@@ -34,16 +34,16 @@ using Distributions: Distributions, Beta, Dirac, Dirichlet, Distribution,
     Exponential, Gamma, LogNormal, NegativeBinomial, Normal, Poisson,
     Truncated, Uniform, Weibull, cdf, fit, logpdf, params, pdf, scale, shape,
     truncated
+using FlexiChains: FlexiChains, VNChain
 using LinearAlgebra: LinearAlgebra
-using MCMCChains: MCMCChains
 using Mooncake: Mooncake
 using PrecompileTools: @compile_workload, @setup_workload
 using Random: Random
 using ReverseDiff: ReverseDiff
 using SpecialFunctions: loggamma, besseli
 using Statistics: Statistics, mean, median, quantile, std
-using Turing: Turing, @model, InitFromParams, InitFromUniform, MCMCThreads, NUTS,
-    arraydist, filldist
+using Turing: Turing, @model, @varname, InitFromParams, InitFromUniform,
+    MCMCThreads, NUTS, arraydist, filldist
 
 # ── AD backends (re-exported from ADTypes for convenience in inference_opts) ─
 export AutoForwardDiff, AutoReverseDiff, AutoMooncake

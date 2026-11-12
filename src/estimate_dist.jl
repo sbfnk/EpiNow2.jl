@@ -27,13 +27,13 @@ end
 """
     EstimateDistResult
 
-Result of `estimate_dist()`. Holds the underlying MCMCChains `chain`,
+Result of `estimate_dist()`. Holds the underlying FlexiChains `chain`,
 the configuration `args`, the (preprocessed) `observations`, and a
 posterior-mean `UncertainDistribution` for downstream use in
 `delay_opts()` / `gt_opts()` / `trunc_opts()`.
 """
 struct EstimateDistResult
-    chain::MCMCChains.Chains
+    chain::VNChain
     args::EstimateDistArgs
     observations::DataFrame
     fitted::UncertainDistribution
@@ -317,6 +317,7 @@ function estimate_dist(
             num_warmup = inference.warmup,
             progress = inference.progress,
             verbose = false,
+            chain_type = VNChain,
         )
     else
         Turing.sample(
@@ -325,6 +326,7 @@ function estimate_dist(
             num_warmup = inference.warmup,
             progress = inference.progress,
             verbose = false,
+            chain_type = VNChain,
         )
     end
     elapsed = time() - t0
@@ -333,8 +335,9 @@ function estimate_dist(
 
     # Posterior summary → UncertainDistribution
     n_params = length(used_priors)
-    param_means = [mean(vec(Array(chain[Symbol("params[$i]")]))) for i in 1:n_params]
-    param_sds = [std(vec(Array(chain[Symbol("params[$i]")]))) for i in 1:n_params]
+    param_draws = [vec(Array(chain[@varname(params[i])])) for i in 1:n_params]
+    param_means = mean.(param_draws)
+    param_sds = std.(param_draws)
 
     fitted = UncertainDistribution(
         constructor,

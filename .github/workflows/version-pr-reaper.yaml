@@ -1,4 +1,6 @@
 # MANAGED by EpiAwarePackageTools.scaffold — do not edit by hand.
+# EPIAWARE_MANAGED_OVERRIDE: the reusable workflow lives in EpiAware/.github,
+# not in the .github repository of this package's owner.
 #
 # Closes an auto-increment PR, and deletes its branch, once the package
 # version on main has reached or passed the version the PR proposes (thin

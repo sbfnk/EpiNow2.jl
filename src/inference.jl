@@ -56,6 +56,7 @@ function _sample(model, opts::InferenceOpts)
             num_warmup = opts.warmup,
             initial_params = [_initial_params(model) for _ in 1:opts.chains],
             progress = opts.progress,
+            chain_type = VNChain,
         )
     else
         Turing.sample(
@@ -63,6 +64,7 @@ function _sample(model, opts::InferenceOpts)
             num_warmup = opts.warmup,
             initial_params = _initial_params(model),
             progress = opts.progress,
+            chain_type = VNChain,
         )
     end
 end
@@ -75,7 +77,7 @@ quantities (infections, R, reports from model return values), and
 metadata for date mapping.
 """
 struct EpiNow2Fit{M, G}
-    chain::MCMCChains.Chains
+    chain::VNChain
     generated_quantities::Vector{G}
     metadata::M
 end

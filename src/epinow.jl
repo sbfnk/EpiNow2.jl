@@ -85,9 +85,8 @@ function estimate_infections(
 
     verbose && @info "Inference complete" seconds = round(elapsed, digits = 1)
 
-    if :gp_rho in names(fit.chain)
-        check_gp_lengthscale(vec(Array(fit.chain[:gp_rho])), assembled.metadata)
-    end
+    gp_rho = _chain_vector(fit, :gp_rho)
+    isnothing(gp_rho) || check_gp_lengthscale(gp_rho, assembled.metadata)
 
     args = EstimateInfectionsArgs(
         generation_time, delays, truncation, rt, backcalc, gp, obs,
