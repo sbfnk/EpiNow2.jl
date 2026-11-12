@@ -1,4 +1,7 @@
 # MANAGED by EpiAwarePackageTools.scaffold — do not edit by hand.
+# EPIAWARE_MANAGED_OVERRIDE: this repository is outside the EpiAware org,
+# where `secrets: inherit` passes nothing to the EpiAware/.github workflows,
+# so the Codecov token is passed by name.
 name: Test
 
 on:
@@ -31,7 +34,8 @@ jobs:
       # with silently missing coverage; that is org policy and is left at
       # the default rather than restated here.
       upload_coverage: true
-    secrets: inherit  # pragma: allowlist secret
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}  # pragma: allowlist secret
 
   downgrade-compat:
     uses: EpiAware/.github/.github/workflows/downgrade.yml@cc63ecb3cfa4bb1c8c40a5decf5e339e729c5f30
