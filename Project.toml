@@ -1,7 +1,7 @@
 name = "EpiNow2"
 uuid = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
 authors = ["Sebastian Funk <sebastian.funk@lshtm.ac.uk>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
