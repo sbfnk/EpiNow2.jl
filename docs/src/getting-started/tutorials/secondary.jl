@@ -26,7 +26,7 @@ cases_df = CSV.read(
 cases_df.date = Date.(cases_df.date)
 cases_df = first(cases_df, 60)
 
-# Simulate hospitalisations: 10% of cases with a lognormal delay
+## Simulate hospitalisations: 10% of cases with a lognormal delay
 primary = DataFrame(date = cases_df.date, primary = cases_df.confirm)
 hosp = simulate_secondary(
     primary;
@@ -116,7 +116,7 @@ sec
 
 fig = Figure(size = (600, 600))
 
-# Cases panel
+## Cases panel
 ax1 = Axis(
     fig[1, 1]; title = "Confirmed cases", ylabel = "Count",
     xticklabelrotation = π / 6
@@ -138,7 +138,7 @@ vlines!(ax1, [fd]; color = :grey40, linestyle = :dot)
 tick_idx = 1:max(1, length(date_nums_r) ÷ 6):length(date_nums_r)
 ax1.xticks = (date_nums_r[tick_idx], string.(est.reports.date[tick_idx]))
 
-# Hospitalisations panel
+## Hospitalisations panel
 ax2 = Axis(
     fig[2, 1]; title = "Hospitalisations", xlabel = "Date", ylabel = "Count",
     xticklabelrotation = π / 6
