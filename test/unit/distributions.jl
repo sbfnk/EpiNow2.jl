@@ -90,6 +90,8 @@ end
         verbose = false,
     )
     @test result isa EpiNow2.EstimateDistResult
+    # `samples` is the total number of draws kept, as for the other models.
+    @test size(result.chain, 1) * size(result.chain, 2) == 200
     @test result.fitted isa UncertainDistribution
     @test length(result.fitted.param_priors) == 2
     # Posterior mean of meanlog should land near the truth (1.5).
@@ -172,4 +174,11 @@ end
     )
     @test ud isa UncertainDistribution
     @test length(ud.param_priors) == 2
+end
+
+@testitem "options display composite delays" setup = [TestSetup] begin
+    delays = delay_opts(LogNormal(1.6, 0.5) + discretise(LogNormal(0.5, 0.3); max = 7))
+    shown = sprint(show, MIME"text/plain"(), delays)
+    @test occursin("Composite distribution:", shown)
+    @test occursin("lognormal", shown)
 end

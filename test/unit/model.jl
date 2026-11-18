@@ -36,3 +36,28 @@ end
     R_back = growth_to_R(r, gt_pmf)
     @test R_back ≈ 1.5 atol = 0.05
 end
+
+@testitem "GP basis settings follow the lengthscale prior" setup = [TestSetup] begin
+    # Reference values from R's gp_basis_settings() with the default
+    # Matern 3/2 kernel and lengthscale prior, LogNormal(mean = 21, sd = 7,
+    # max = 60).
+    gp = gp_opts()
+    q = EpiNow2.gp_ls_quantiles(gp.ls)
+    @test q ≈ [11.68003, 33.94469] rtol = 1.0e-5
+    for (n, L, M) in ((29, 10.91079, 45), (59, 5.267279, 45), (100, 3.085881, 45))
+        settings = EpiNow2.gp_basis_settings(gp, n)
+        @test settings[1] ≈ L rtol = 1.0e-5
+        @test settings[2] == M
+    end
+    m52 = EpiNow2.gp_basis_settings(gp_opts(matern_order = 2.5), 59)
+    @test m52[1] ≈ 4.799077 rtol = 1.0e-5
+    @test m52[2] == 32
+    se_settings = EpiNow2.gp_basis_settings(gp_opts(kernel = se), 59)
+    @test se_settings[1] ≈ 3.745621 rtol = 1.0e-5
+    @test se_settings[2] == 17
+    @test EpiNow2.gp_basis_settings(gp_opts(kernel = periodic), 59) == (1.5, 10)
+    # Explicit settings are used as given
+    @test EpiNow2.gp_basis_settings(
+        gp_opts(basis_prop = 0.2, boundary_scale = 1.5), 59
+    ) == (1.5, 12)
+end

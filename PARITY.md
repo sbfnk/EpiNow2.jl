@@ -7,9 +7,9 @@ at the time each row was last assessed. Bump the per-row reference when
 you re-check a feature; bump the global reference at the top when you
 do a sweep.
 
-**Global parity reference:** EpiNow2 R `main` @ `8454b076` (post-1.8.0
-dev), assessed 2026-04-28; further gaps closed on `parity-fixes`
-branch the same day (see PR / commit log).
+**Global parity reference:** EpiNow2 R `main` @ `115424bc` (post-1.9.0
+dev), assessed 2026-11-11. Rows not touched by that sweep keep their
+earlier `8454b076` reference.
 
 **Status legend:**
 
@@ -32,10 +32,10 @@ reason.
 
 | R function                | .jl status     | Ref commit | Notes |
 |---------------------------|----------------|------------|-------|
-| `epinow()`                | ✅ matched     | 8454b076   | v1.8 S3 args parity via inner `EstimateInfectionsResult.args`. |
+| `epinow()`                | ✅ matched     | 115424bc   | v1.8 S3 args parity via inner `EstimateInfectionsResult.args`. `target_date::Date` extends the forecast horizon (#1433, #1525). |
 | `estimate_infections()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateInfectionsArgs`). v1.8 adjusted-vs-unadjusted Rt outputs split (`result.rt` is depletion-adjusted; `result.rt_unadjusted` is the transmission Rt). |
 | `estimate_secondary()`    | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateSecondaryArgs`). |
-| `estimate_truncation()`   | ✅ matched     | 8454b076   | v1.8 S3 args parity (`result.args :: EstimateTruncationArgs`). |
+| `estimate_truncation()`   | ⚠️ partial     | 115424bc   | `obs` (family, dispersion prior with φ = 1/od², likelihood switch), `noise` prior and any parametric delay family (#1340). Nonparametric (Dirichlet) truncation from #1338 not ported; `return_likelihood` not exposed. |
 | `estimate_dist()`         | ✅ matched     | 8454b076   | Censored MCMC fit via `CensoredDistributions.double_interval_censored` + Turing/NUTS. Lognormal/gamma/normal/exp/weibull families; uniform and expgrowth primary windows. |
 | `regional_epinow()`       | ✅ matched     | 8454b076   | |
 | `forecast_infections()`   | ✅ matched     | 8454b076   | |
@@ -52,12 +52,12 @@ reason.
 | `delay_opts()`                | ✅ matched     | 8454b076   | |
 | `trunc_opts()`                | ✅ matched     | 8454b076   | |
 | `rt_opts()`                   | ⚠️ partial     | 8454b076   | v1.8 changed `pop` to require `Fixed(pop)` — `.jl` accepts plain numeric. Adjusted vs unadjusted Rt outputs from v1.8 not mirrored. |
-| `gp_opts()`                   | ⚠️ partial     | 8454b076   | Pre-v1.7 parameter names (`ls_mean`/`alpha_mean`) deprecation matched (`.jl` uses single-prior interface). v1.7 internal lengthscale rescaling matched. |
+| `gp_opts()`                   | ✅ matched     | 115424bc   | `basis_prop` and `boundary_scale` default to `nothing` and are chosen from the lengthscale prior quantiles (#1562, #1625); lengthscale rescaled by `max(n - 1, 1)`; post-fit lengthscale range warning. `gp = nothing` switches the GP off. |
 | `obs_opts()`                  | ✅ matched     | 8454b076   | |
 | `backcalc_opts()`             | ✅ matched     | 8454b076   | |
 | `forecast_opts()`             | ✅ matched     | 8454b076   | |
 | `secondary_opts()`            | ✅ matched     | 8454b076   | |
-| `inference_opts()`            | N/A (Julia)    | —          | Julia analogue of `stan_*_opts`; controls Turing/AdvancedHMC. |
+| `inference_opts()`            | N/A (Julia)    | 115424bc   | Julia analogue of `stan_*_opts`. Defaults follow `stan_sampling_opts()`: warmup 500 (#1480), `samples` is the total across chains, and chains start `R_mean` from a draw of the Rt prior (#1479). |
 | `stan_opts()` / `stan_*_opts()` | N/A          | —          | Stan-specific; `.jl` uses `inference_opts()`. |
 
 ## Model components
@@ -65,13 +65,13 @@ reason.
 | Feature                                    | .jl status | Ref commit | Notes |
 |--------------------------------------------|------------|------------|-------|
 | Renewal-equation infections                | ✅ matched | 8454b076   | |
-| Random-walk Rt                             | ✅ matched | 8454b076   | |
-| Gaussian process Rt (HSGP, Matern/SE/periodic) | ✅ matched | 8454b076 | Vendored Matern spectral fix from R 1.6.1. |
-| Breakpoints on Rt                          | ✅ matched | 8454b076   | |
+| Random-walk Rt                             | ✅ matched | 115424bc   | Built as breakpoints every `rw` days, held over the forecast unless `future = project`, and combined with the GP unless `gp = nothing`, as in R. |
+| Gaussian process Rt (HSGP, Matern/SE/periodic) | ✅ matched | 115424bc | Centred intercept: `R_mean` is the mean of Rt over the observed window and the Rt prior applies to R[1] with the Jacobian from #1478 (#1396, #1429). |
+| Breakpoints on Rt                          | ✅ matched | 115424bc   | Breakpoint path centred over the observed window (#1429). |
 | Population adjustment / depletion          | ✅ matched | 8454b076   | v1.8 split into `R` (adjusted) and `R_unadjusted` (transmission) honoured. |
 | Day-of-week effect                         | ✅ matched | 8454b076   | |
 | Truncation adjustment                      | ✅ matched | 8454b076   | |
-| Uncertain delay/gt distributions           | ✅ matched | 8454b076   | Sampling-based, with optional prior weighting. |
+| Uncertain delay/gt distributions           | ✅ matched | 115424bc   | Prior weighted by the number of observed days per delay with `weight_prior`, as in R. Mixed fixed and uncertain composite delays keep the fixed part. Nonparametric delays with a Dirichlet prior (#1338) not ported. |
 | Back-calculation (no Rt)                   | ✅ matched | 8454b076   | |
 | Accumulation of irregularly-reported data  | ✅ matched | 8454b076   | `accumulate::Vector{Bool}` column on `EpiData`, plus user-facing `fill_missing()` helper that auto-detects fixed reporting intervals. |
 | NegBin / Poisson likelihood                | ✅ matched | 8454b076   | |
@@ -83,7 +83,7 @@ reason.
 | R feature                              | .jl status     | Ref commit | Notes |
 |----------------------------------------|----------------|------------|-------|
 | `Fixed()`, `Gamma()`, `LogNormal()`, `Normal()` constructors | N/A (Julia distributions) | — | `.jl` uses `Distributions.jl` types directly. |
-| `NonParametric()`                      | ✅ matched (`NonParametricDist`) | 8454b076 | |
+| `NonParametric()`                      | ⚠️ partial (`NonParametricDist`) | 115424bc | Fixed PMFs only; estimating the PMF with a Dirichlet prior (#1338) not ported. |
 | `new_dist_spec()` / `dist_spec` algebra | ⚠️ partial    | 8454b076   | `UncertainDistribution` and `CompositeDelay` cover sampling + convolution. R's `+`, `==`, `c()`, `collapse()`, `fix_parameters()`, `bound_dist()`, `is_constrained()`, `get_distribution()`, `get_pmf()` algebra not exposed. |
 | `discretise()`                         | ✅ matched     | 8454b076   | Vendored `primarycensored` — same numerical behaviour as R 1.8.0. |
 | `convolve_and_scale()`                 | ✅ matched (`convolve_pmfs`) | 8454b076 | |
@@ -152,7 +152,10 @@ deprecation table) once assessed.
 
 | R commit / PR | Summary | Triage status |
 |---------------|---------|---------------|
-| _none yet_    |         |               |
+| #1338 | Nonparametric delays estimated with a Dirichlet prior | Open: needs a Dirichlet-backed `NonParametricDist` in the infections, secondary and truncation models. |
+| #1561 | `R_to_r()` capped at 100 Newton steps with tolerance 1e-3 | Open: `.jl` uses a fixed two Newton steps from a moment-based start. |
+| #1317, #1367, #1421, #1540, #1553, #1554 | `estimate_dist()`, scoringutils forecasts, GP refactor, `extract_samples()` deprecation, constant prior terms, delay prior weights | Assessed 115424bc: already equivalent in `.jl` or no change to the posterior. |
+| #1324, #1370, #1400, #1432, #1471, #1499, #1501, #1516, #1518, #1522, #1523, #1530, #1596 | R plumbing, distspec adoption, init and warning fixes | N/A: Stan- or R-specific. |
 
 ---
 

@@ -165,15 +165,12 @@ end
 function run_julia_truncation(snapshots)
     # max=10 and Normal(1,1) sdlog prior match the R reference configuration.
     trunc_dist = EpiNow2.UncertainDistribution(
-        (m, s) -> LogNormal(m, s), [Normal(0.0, 1.0), Normal(1.0, 1.0)], 10.0
+        (m, s) -> LogNormal(m, s),
+        [Normal(0.0, 1.0), truncated(Normal(1.0, 1.0); lower = 0.0)], 10.0
     )
     return estimate_truncation(
         snapshots;
-        truncation = trunc_opts(
-            trunc_dist;
-            meanlog_prior = Normal(0.0, 1.0),
-            sdlog_prior = truncated(Normal(1.0, 1.0); lower = 0.0)
-        ),
+        truncation = trunc_opts(trunc_dist),
         inference = inference_opts(
             samples = 1000, warmup = 500, chains = 1, seed = 42, progress = false
         ),
@@ -314,8 +311,8 @@ function run_validation()
             println("Running Julia estimate_truncation...")
             tres = run_julia_truncation(snapshots)
             gqs = tres.fit.generated_quantities
-            jl_meanlog = mean(g.trunc_meanlog for g in gqs)
-            jl_sdlog = mean(g.trunc_sdlog for g in gqs)
+            jl_meanlog = mean(g.trunc_params[1] for g in gqs)
+            jl_sdlog = mean(g.trunc_params[2] for g in gqs)
 
             ml_err = abs(jl_meanlog - r_meanlog) / abs(r_meanlog)
             sl_err = abs(jl_sdlog - r_sdlog) / abs(r_sdlog)

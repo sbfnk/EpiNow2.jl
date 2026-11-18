@@ -31,7 +31,9 @@ end
 # still exercising the renewal equation, delays and observation model.
 _ad_data() = first(EpiNow2.example_confirmed(), 30)
 
-function _model_scenario(name; rt = EpiNow2.rt_opts(), with_reference)
+function _model_scenario(
+        name; rt = EpiNow2.rt_opts(), gp = EpiNow2.gp_opts(), with_reference
+    )
     assembled = EpiNow2.assemble_model(
         EpiNow2.EpiData(_ad_data());
         generation_time = EpiNow2.gt_opts(
@@ -43,7 +45,7 @@ function _model_scenario(name; rt = EpiNow2.rt_opts(), with_reference)
         truncation = EpiNow2.trunc_opts(),
         rt = rt,
         backcalc = EpiNow2.backcalc_opts(),
-        gp = EpiNow2.gp_opts(),
+        gp = gp,
         obs = EpiNow2.obs_opts(),
         forecast = EpiNow2.forecast_opts(horizon = 0)
     )
@@ -72,7 +74,7 @@ function scenarios(; with_reference::Bool = false, category::Symbol = :marginal)
         _model_scenario("infections model (GP)"; with_reference),
         _model_scenario(
             "infections model (random walk)";
-            rt = EpiNow2.rt_opts(rw = 7), with_reference
+            rt = EpiNow2.rt_opts(rw = 7), gp = nothing, with_reference
         ),
     ]
 end
