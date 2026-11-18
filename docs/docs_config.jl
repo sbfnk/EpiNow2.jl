@@ -14,7 +14,10 @@ const LIGHT_TUTORIALS = String[]
 # in a fresh subprocess so native/memory state cannot accumulate. The
 # kit-managed AD-comparison page is registered in `HEAVY_BENCHMARKS` below
 # instead, so this list starts empty and is yours to fill.
-const HEAVY_TUTORIALS = String[]
+const HEAVY_TUTORIALS = String[
+    "estimate-infections-workflow.jl",
+    "secondary.jl",
+]
 
 # Where tutorial `.jl` sources and rendered `.md` pages live, relative to
 # `docs/src`.
@@ -23,7 +26,10 @@ const TUTORIALS_SUBDIR = joinpath("getting-started", "tutorials")
 # Fast-build stubs (`--skip-notebooks`): `"file.md" => "# Heading"` pairs.
 # Preserve the tutorial's `@id` in the heading (e.g. `"# [Title](@id
 # my-anchor)"`) so cross-references still resolve in a fast build.
-const TUTORIAL_STUBS = Pair{String, String}[]
+const TUTORIAL_STUBS = Pair{String, String}[
+    "estimate-infections-workflow.md" => "# Workflow for Rt estimation and forecasting",
+    "secondary.md" => "# Forecasting multiple data streams",
+]
 
 # Heavy tutorials that always render from their `TUTORIAL_STUBS` heading and
 # never execute, independent of `--skip-notebooks` — the escape hatch for a
@@ -79,7 +85,7 @@ const TUTORIAL_ENVIRONMENTS = Pair{String, String}[]
 # Watch memory before raising it above 2 on a standard CI runner. Under a
 # parallel build each tutorial's output is printed as one block when it
 # finishes, and every failure is named at the end.
-const HEAVY_TUTORIAL_WORKERS = 1
+const HEAVY_TUTORIAL_WORKERS = 2
 
 # The `docs/src/benchmarks/` Literate pipeline: its own heavy list and stubs,
 # mirroring `HEAVY_TUTORIALS`/`TUTORIAL_STUBS` above but rooted at
@@ -171,8 +177,8 @@ const HISTORY_REGRESSION_THRESHOLD = 1.1
 # ecosystem rather than a per-repo choice (#354). These are the only tutorials
 # in the nav; the kit itself writes no tutorial page.
 const PACKAGE_TUTORIALS = Pair{String, String}[
-    "Estimating Rt and forecasting" => "tutorials/estimate-infections-workflow.md",
-    "Multiple data streams" => "tutorials/secondary.md",
+    "Estimating Rt and forecasting" => "getting-started/tutorials/estimate-infections-workflow.md",
+    "Multiple data streams" => "getting-started/tutorials/secondary.md",
 ]
 
 # Whole extra top-level nav groups the package owns (e.g. "Tools", "Guide",
