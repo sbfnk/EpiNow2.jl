@@ -36,13 +36,15 @@ struct EpiData
         diffs = diff(Dates.value.(dates))
         if !all(diffs .== 1)
             if :accumulate in propertynames(sorted) || :breakpoints in propertynames(sorted)
-                throw(ArgumentError(
-                    "Non-contiguous dates with accumulate/breakpoints columns " *
-                    "are not supported. Fill gaps before constructing EpiData."
-                ))
+                throw(
+                    ArgumentError(
+                        "Non-contiguous dates with accumulate/breakpoints columns " *
+                            "are not supported. Fill gaps before constructing EpiData."
+                    )
+                )
             end
             @warn "Non-contiguous dates detected; missing dates will be " *
-                  "filled with zeros"
+                "filled with zeros"
             dates, confirm = _fill_missing_dates(dates, confirm)
         end
 
@@ -58,7 +60,7 @@ struct EpiData
             fill(0, length(dates))
         end
 
-        new(dates, confirm, accumulate, breakpoints)
+        return new(dates, confirm, accumulate, breakpoints)
     end
 end
 
@@ -85,7 +87,7 @@ struct SecondaryData
         :secondary in propertynames(df) || throw(ArgumentError("Must have :secondary column"))
 
         sorted = sort(df, :date)
-        new(Date.(sorted.date), Int.(sorted.primary), Int.(sorted.secondary))
+        return new(Date.(sorted.date), Int.(sorted.primary), Int.(sorted.secondary))
     end
 end
 
@@ -94,12 +96,18 @@ end
 """
     example_confirmed() -> DataFrame
 
-Return a DataFrame with ~60 days of synthetic case data for use in examples
-and testing. Columns: `:date` and `:confirm`.
+Example case data: 60 days of synthetic daily case counts from a renewal
+process with a slowly oscillating Rt, starting on 1 March 2024. Columns:
+`:date` and `:confirm`.
+
+```@example example_confirmed
+using EpiNow2
+first(example_confirmed(), 5)
+```
 """
 function example_confirmed()
     n_days = 60
-    dates = Date(2024, 3, 1):Day(1):Date(2024, 3, 1) + Day(n_days - 1)
+    dates = Date(2024, 3, 1):Day(1):(Date(2024, 3, 1) + Day(n_days - 1))
     # Deterministic renewal process with time-varying Rt
     rt = [1.0 + 0.3 * sin(2π * t / 40) for t in 1:n_days]
     infections = zeros(Float64, n_days)
@@ -108,12 +116,12 @@ function example_confirmed()
     for t in 2:n_days
         λ = rt[t] * sum(
             infections[max(t - s, 1)] * gt_pmf[min(s + 1, length(gt_pmf))]
-            for s in 1:min(t - 1, length(gt_pmf) - 1)
+                for s in 1:min(t - 1, length(gt_pmf) - 1)
         )
         infections[t] = max(λ, 1.0)
     end
     cases = [max(1, round(Int, x)) for x in infections]
-    DataFrame(date=collect(dates), confirm=cases)
+    return DataFrame(date = collect(dates), confirm = cases)
 end
 
 # ── Example delay distributions (matching R's example_* functions) ───
@@ -121,31 +129,46 @@ end
 """
     example_generation_time()
 
-Example generation time distribution for COVID-19 (Ganyani et al. 2020).
-Mean 3.6 days, SD 3.1 days, as a LogNormal.
+Example generation time for COVID-19 (Ganyani et al. 2020): a lognormal
+distribution with mean 3.6 days and standard deviation 3.1 days.
+
+```@example example_generation_time
+using EpiNow2
+gt_opts(example_generation_time())
+```
 """
 function example_generation_time()
-    LogNormal(_moments_to_lognormal(3.6, 3.1)...)
+    return LogNormal(_moments_to_lognormal(3.6, 3.1)...)
 end
 
 """
     example_incubation_period()
 
-Example incubation period for COVID-19 (Lauer et al. 2020).
-Mean 5.2 days, SD 2.8 days, as a LogNormal.
+Example incubation period for COVID-19 (Lauer et al. 2020): a lognormal
+distribution with mean 5.2 days and standard deviation 2.8 days.
+
+```@example example_incubation_period
+using EpiNow2
+delay_opts(example_incubation_period())
+```
 """
 function example_incubation_period()
-    LogNormal(_moments_to_lognormal(5.2, 2.8)...)
+    return LogNormal(_moments_to_lognormal(5.2, 2.8)...)
 end
 
 """
     example_reporting_delay()
 
-Example reporting delay (onset to report) for COVID-19.
-Mean 2.0 days, SD 1.0 day, as a LogNormal.
+Example delay from symptom onset to report for COVID-19: a lognormal
+distribution with mean 2 days and standard deviation 1 day.
+
+```@example example_reporting_delay
+using EpiNow2
+delay_opts(example_reporting_delay())
+```
 """
 function example_reporting_delay()
-    LogNormal(_moments_to_lognormal(2.0, 1.0)...)
+    return LogNormal(_moments_to_lognormal(2.0, 1.0)...)
 end
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -157,5 +180,5 @@ function _fill_missing_dates(dates, confirm)
         idx = Dates.value(d - dates[1]) + 1
         full_confirm[idx] = c
     end
-    (collect(full_range), full_confirm)
+    return (collect(full_range), full_confirm)
 end

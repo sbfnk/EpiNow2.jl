@@ -24,7 +24,7 @@ function _r_bridge_convert_samples_df(result)
     if hasproperty(df2, :variable)
         df2.variable = string.(df2.variable)
     end
-    df2
+    return df2
 end
 
 """
@@ -41,21 +41,25 @@ function _r_bridge_get_secondary_samples(result)
     n_times = length(dates)
 
     rows = Vector{
-        NamedTuple{(:date, :variable, :sample, :value),
-                   Tuple{String, String, Int, Float64}}
+        NamedTuple{
+            (:date, :variable, :sample, :value),
+            Tuple{String, String, Int, Float64},
+        },
     }()
     for (si, gq) in enumerate(gqs)
         expected = gq.expected
         for t in 1:min(length(expected), n_times)
-            push!(rows, (
-                date = string(dates[t]),
-                variable = "sim_secondary",
-                sample = si,
-                value = Float64(expected[t]),
-            ))
+            push!(
+                rows, (
+                    date = string(dates[t]),
+                    variable = "sim_secondary",
+                    sample = si,
+                    value = Float64(expected[t]),
+                )
+            )
         end
     end
-    DataFrame(rows)
+    return DataFrame(rows)
 end
 
 # ── String → enum lookups ─────────────────────────────────────────────────
@@ -67,48 +71,48 @@ end
 # at the bad option.
 
 function _r_bridge_forecast_mode(s::AbstractString)
-    s == "latest"   ? latest   :
-    s == "project"  ? project  :
-    s == "estimate" ? estimate :
-    error("Unknown forecast mode '$s' (expected latest|project|estimate)")
+    return s == "latest" ? latest :
+        s == "project" ? project :
+        s == "estimate" ? estimate :
+        error("Unknown forecast mode '$s' (expected latest|project|estimate)")
 end
 
 function _r_bridge_gp_target(s::AbstractString)
-    s == "gp_Rt" ? gp_Rt :
-    s == "gp_R0" ? gp_R0 :
-    error("Unknown gp_on '$s' (expected gp_Rt|gp_R0)")
+    return s == "gp_Rt" ? gp_Rt :
+        s == "gp_R0" ? gp_R0 :
+        error("Unknown gp_on '$s' (expected gp_Rt|gp_R0)")
 end
 
 function _r_bridge_pop_period(s::AbstractString)
-    s == "pop_forecast" ? pop_forecast :
-    s == "pop_all"      ? pop_all      :
-    error("Unknown pop_period '$s' (expected pop_forecast|pop_all)")
+    return s == "pop_forecast" ? pop_forecast :
+        s == "pop_all" ? pop_all :
+        error("Unknown pop_period '$s' (expected pop_forecast|pop_all)")
 end
 
 function _r_bridge_backcalc_prior(s::AbstractString)
-    s == "bc_infections"  ? bc_infections  :
-    s == "bc_none"        ? bc_none        :
-    s == "bc_growth_rate" ? bc_growth_rate :
-    error("Unknown backcalc prior '$s' (expected bc_infections|bc_none|bc_growth_rate)")
+    return s == "bc_infections" ? bc_infections :
+        s == "bc_none" ? bc_none :
+        s == "bc_growth_rate" ? bc_growth_rate :
+        error("Unknown backcalc prior '$s' (expected bc_infections|bc_none|bc_growth_rate)")
 end
 
 function _r_bridge_obs_family(s::AbstractString)
-    s == "negbin"  ? negbin  :
-    s == "poisson" ? poisson :
-    error("Unknown obs family '$s' (expected negbin|poisson)")
+    return s == "negbin" ? negbin :
+        s == "poisson" ? poisson :
+        error("Unknown obs family '$s' (expected negbin|poisson)")
 end
 
 function _r_bridge_gp_kernel(s::AbstractString)
-    s == "matern"   ? matern   :
-    s == "se"       ? se       :
-    s == "periodic" ? periodic :
-    error("Unknown GP kernel '$s' (expected matern|se|periodic)")
+    return s == "matern" ? matern :
+        s == "se" ? se :
+        s == "periodic" ? periodic :
+        error("Unknown GP kernel '$s' (expected matern|se|periodic)")
 end
 
 function _r_bridge_secondary_type(s::AbstractString)
-    s == "incidence"  ? incidence  :
-    s == "prevalence" ? prevalence :
-    error("Unknown secondary type '$s' (expected incidence|prevalence)")
+    return s == "incidence" ? incidence :
+        s == "prevalence" ? prevalence :
+        error("Unknown secondary type '$s' (expected incidence|prevalence)")
 end
 
 # ── Option-builder helpers ────────────────────────────────────────────────
@@ -118,10 +122,12 @@ end
 # Distribution objects passed through JuliaConnectoR) and constructs the
 # corresponding *Opts struct.
 
-function _r_bridge_rt_opts(prior::Distribution; rw::Integer, future::AbstractString,
-                           gp_on::AbstractString, pop, pop_period::AbstractString,
-                           pop_floor::Real)
-    rt_opts(
+function _r_bridge_rt_opts(
+        prior::Distribution; rw::Integer, future::AbstractString,
+        gp_on::AbstractString, pop, pop_period::AbstractString,
+        pop_floor::Real
+    )
+    return rt_opts(
         prior = prior,
         use_rt = true,
         rw = Int(rw),
@@ -133,10 +139,12 @@ function _r_bridge_rt_opts(prior::Distribution; rw::Integer, future::AbstractStr
     )
 end
 
-function _r_bridge_gp_opts(ls::Distribution, alpha::Distribution;
-                           basis_prop::Real, boundary_scale::Real,
-                           kernel::AbstractString, matern_order::Real, w0::Real)
-    gp_opts(
+function _r_bridge_gp_opts(
+        ls::Distribution, alpha::Distribution;
+        basis_prop::Real, boundary_scale::Real,
+        kernel::AbstractString, matern_order::Real, w0::Real
+    )
+    return gp_opts(
         basis_prop = Float64(basis_prop),
         boundary_scale = Float64(boundary_scale),
         ls = ls,
@@ -147,11 +155,13 @@ function _r_bridge_gp_opts(ls::Distribution, alpha::Distribution;
     )
 end
 
-function _r_bridge_obs_opts(dispersion::Distribution, scale;
-                            family::AbstractString, weight::Real,
-                            week_effect::Bool, week_length::Integer,
-                            likelihood::Bool)
-    obs_opts(
+function _r_bridge_obs_opts(
+        dispersion::Distribution, scale;
+        family::AbstractString, weight::Real,
+        week_effect::Bool, week_length::Integer,
+        likelihood::Bool
+    )
+    return obs_opts(
         family = _r_bridge_obs_family(family),
         dispersion = dispersion,
         weight = Float64(weight),
@@ -162,20 +172,24 @@ function _r_bridge_obs_opts(dispersion::Distribution, scale;
     )
 end
 
-function _r_bridge_backcalc_opts(; prior::AbstractString,
-                                 prior_window::Integer, rt_window::Integer)
-    backcalc_opts(
+function _r_bridge_backcalc_opts(;
+        prior::AbstractString,
+        prior_window::Integer, rt_window::Integer
+    )
+    return backcalc_opts(
         prior = _r_bridge_backcalc_prior(prior),
         prior_window = Int(prior_window),
         rt_window = Int(rt_window),
     )
 end
 
-function _r_bridge_inference_opts(; samples::Integer, warmup::Integer,
-                                  chains::Integer, target_acceptance::Real,
-                                  max_treedepth::Integer,
-                                  seed::Union{Integer, Nothing}=nothing,
-                                  adtype::Union{ADTypes.AbstractADType, Nothing}=nothing)
+function _r_bridge_inference_opts(;
+        samples::Integer, warmup::Integer,
+        chains::Integer, target_acceptance::Real,
+        max_treedepth::Integer,
+        seed::Union{Integer, Nothing} = nothing,
+        adtype::Union{ADTypes.AbstractADType, Nothing} = nothing
+    )
     kwargs = Dict{Symbol, Any}(
         :samples => Int(samples),
         :warmup => Int(warmup),
@@ -183,11 +197,11 @@ function _r_bridge_inference_opts(; samples::Integer, warmup::Integer,
         :target_acceptance => Float64(target_acceptance),
         :max_treedepth => Int(max_treedepth),
     )
-    isnothing(seed)   || (kwargs[:seed]   = Int(seed))
+    isnothing(seed)   || (kwargs[:seed] = Int(seed))
     isnothing(adtype) || (kwargs[:adtype] = adtype)
-    inference_opts(; kwargs...)
+    return inference_opts(; kwargs...)
 end
 
 function _r_bridge_secondary_opts(; type::AbstractString)
-    secondary_opts(_r_bridge_secondary_type(type))
+    return secondary_opts(_r_bridge_secondary_type(type))
 end

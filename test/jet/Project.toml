@@ -1,0 +1,11 @@
+[deps]
+EpiAwarePackageTools = "7aaea248-0d11-4a0d-a7dc-86da30abb951"
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
+EpiNow2 = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
+
+[sources]
+EpiNow2 = {path = "../.."}
+
+[compat]
+EpiAwarePackageTools = "0.3, 0.4"
+JET = "0.11, 0.12"

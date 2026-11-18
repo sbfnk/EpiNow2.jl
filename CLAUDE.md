@@ -1,3 +1,8 @@
+<!-- epiaware-standards:start MANAGED by EpiAwarePackageTools.scaffold -->
+
+See [AGENTS.md](AGENTS.md).
+<!-- epiaware-standards:end -->
+
 # EpiNow2.jl — Julia Port of EpiNow2
 
 You are building a Julia package that replicates the interface of the EpiNow2 R package (https://epiforecasts.io/EpiNow2/) for estimating time-varying reproduction numbers, infection dynamics, and forecasting. This package uses Turing.jl directly for Bayesian inference — **not** Stan, and **not** EpiAware.jl.

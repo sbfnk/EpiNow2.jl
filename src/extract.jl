@@ -66,7 +66,7 @@ end
 function _latest_estimate(df::DataFrame)
     isempty(df) && return ""
     r = df[end, :]
-    "$(round(r.median, digits=2)) (90% CrI: $(round(r.lower_90, digits=2))-$(round(r.upper_90, digits=2)))"
+    return "$(round(r.median, digits = 2)) (90% CrI: $(round(r.lower_90, digits = 2))-$(round(r.upper_90, digits = 2)))"
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::EstimateInfectionsResult)
@@ -77,39 +77,59 @@ function Base.show(io::IO, ::MIME"text/plain", r::EstimateInfectionsResult)
     println(io, "EpiNow2 estimate_infections result")
     println(io, "  Data: $n_obs days ($d1 to $d_end)")
     n_forecast > 0 && println(io, "  Forecast: $n_forecast days")
-    println(io, "  Timing: $(round(r.timing, digits=1))s")
+    println(io, "  Timing: $(round(r.timing, digits = 1))s")
     println(io)
     println(io, "  Latest Rt: $(_latest_estimate(r.rt))")
     println(io, "  Latest infections: $(_latest_estimate(r.infections))")
-    println(io, "  Latest reports: $(_latest_estimate(r.reports))")
+    return println(io, "  Latest reports: $(_latest_estimate(r.reports))")
 end
 
 function Base.show(io::IO, r::EstimateInfectionsResult)
-    print(io, "EstimateInfectionsResult($(length(r.observations)) obs, " *
-          "Rt=$(_latest_estimate(r.rt)))")
+    return print(
+        io, "EstimateInfectionsResult($(length(r.observations)) obs, " *
+            "Rt=$(_latest_estimate(r.rt)))"
+    )
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::EpinowResult)
-    show(io, MIME("text/plain"), r.estimates)
+    return show(io, MIME("text/plain"), r.estimates)
 end
 
 # ── Accessors ────────────────────────────────────────────────────────────
 
 """
-    get_samples(result; variable=nothing, predictive=false) -> DataFrame
+    get_samples(result; variable = nothing, predictive = false) -> DataFrame
 
-Extract posterior samples as a long-format DataFrame.
+Get posterior samples of the generated quantities (e.g. `:infections`,
+`:reports`, `:R`) in long format, with columns `date`, `variable`, `sample`
+and `value`.
 
-Columns: `date`, `variable`, `sample`, `value`
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
 
-By default the values are the latent generated quantities. With
-`predictive=true`, `:reports` samples are drawn through the fitted observation
-model (NegBin/Poisson), giving the posterior predictive of reported cases;
-other variables are returned unchanged.
+# Keyword Arguments
+- `variable`: name of the variable to return, as a `Symbol`; `nothing`
+  (default) returns all.
+- `predictive`: if `true`, `:reports` samples are drawn through the fitted
+  observation model, giving the posterior predictive of reported cases
+  rather than their expectation. Other variables are unchanged. Default
+  `false`.
+
+```@example get_samples
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+first(get_samples(fit; variable = :R), 5)
+```
 """
 function get_samples(
-    result::EstimateInfectionsResult; variable=nothing, predictive=false
-)
+        result::EstimateInfectionsResult; variable = nothing, predictive = false
+    )
     fit = result.fit
     meta = fit.metadata
     gqs = fit.generated_quantities
@@ -120,8 +140,10 @@ function get_samples(
         _chain_vector(fit, :reporting_overdispersion) : nothing
     rng = predictive ? Random.MersenneTwister(0) : nothing
 
-    rows = NamedTuple{(:date, :variable, :sample, :value),
-                      Tuple{Date, Symbol, Int, Float64}}[]
+    rows = NamedTuple{
+        (:date, :variable, :sample, :value),
+        Tuple{Date, Symbol, Int, Float64},
+    }[]
 
     for (i, gq) in enumerate(gqs)
         for (var, values) in pairs(gq)
@@ -133,59 +155,85 @@ function get_samples(
                 val = add_noise ?
                     _draw_obs(rng, v, family, isnothing(phi) ? nothing : phi[i]) :
                     Float64(v)
-                push!(rows, (
-                    date=dates[t], variable=var_sym, sample=i, value=val
-                ))
+                push!(
+                    rows, (
+                        date = dates[t], variable = var_sym, sample = i, value = val,
+                    )
+                )
             end
         end
     end
 
-    DataFrame(rows)
+    return DataFrame(rows)
 end
 
 get_samples(result::EpinowResult; kwargs...) =
     get_samples(result.estimates; kwargs...)
 
 """
-    get_predictions(result; format=:summary, CrIs=[0.2, 0.5, 0.9],
-                    quantiles=[0.05, 0.25, 0.5, 0.75, 0.95])
+    get_predictions(result; format = :summary, CrIs = [0.2, 0.5, 0.9],
+                    quantiles = [0.05, 0.25, 0.5, 0.75, 0.95])
 
-Extract case predictions in one of three formats:
+Get predictions of reported cases from a fitted model, including the
+forecast horizon.
 
-- `:summary` — pre-computed posterior summary (`result.reports`).
-  `CrIs` controls the credible-interval columns surfaced.
-- `:sample` — long-format posterior samples ready for
-  `scoringutils::as_forecast_sample()`. Columns: `forecast_date`, `date`,
-  `horizon`, `sample`, `predicted`.
-- `:quantile` — quantile predictions ready for
-  `scoringutils::as_forecast_quantile()`. Columns: `forecast_date`,
-  `date`, `horizon`, `quantile_level`, `predicted`. `quantiles`
-  controls the quantile levels.
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `format`: the output format. `:summary` (default) returns the posterior
+  predictive summary in `result.reports`. `:sample` returns posterior
+  predictive samples in long format, with columns `forecast_date`, `date`,
+  `horizon`, `sample` and `predicted`, as expected by
+  `scoringutils::as_forecast_sample()`. `:quantile` returns quantiles with
+  columns `forecast_date`, `date`, `horizon`, `quantile_level` and
+  `predicted`, as expected by `scoringutils::as_forecast_quantile()`.
+- `CrIs`: credible intervals (default `[0.2, 0.5, 0.9]`). The `:summary`
+  format returns the intervals computed at fitting time.
+- `quantiles`: quantile levels for the `:quantile` format (default
+  `[0.05, 0.25, 0.5, 0.75, 0.95]`).
+
+```@example get_predictions
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+last(get_predictions(fit; format = :quantile), 5)
+```
 """
 function get_predictions(
-    result::EstimateInfectionsResult;
-    format::Symbol=:summary,
-    CrIs::Vector{Float64}=[0.2, 0.5, 0.9],
-    quantiles::Vector{Float64}=[0.05, 0.25, 0.5, 0.75, 0.95],
-)
+        result::EstimateInfectionsResult;
+        format::Symbol = :summary,
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9],
+        quantiles::Vector{Float64} = [0.05, 0.25, 0.5, 0.75, 0.95],
+    )
     if format == :summary
         return result.reports
     elseif format == :sample
-        samples = get_samples(result; variable=:reports, predictive=true)
+        samples = get_samples(result; variable = :reports, predictive = true)
         return _format_sample_predictions(samples, result)
     elseif format == :quantile
-        samples = get_samples(result; variable=:reports, predictive=true)
+        samples = get_samples(result; variable = :reports, predictive = true)
         return _format_quantile_predictions(samples, quantiles, result)
     else
-        throw(ArgumentError(
-            "Unknown format: $format. Use :summary, :sample, or :quantile"
-        ))
+        throw(
+            ArgumentError(
+                "Unknown format: $format. Use :summary, :sample, or :quantile"
+            )
+        )
     end
 end
 
+get_predictions(result::EpinowResult; kwargs...) =
+    get_predictions(result.estimates; kwargs...)
+
 function _format_sample_predictions(samples::DataFrame, result)
     forecast_date = result.observations.date[end]
-    DataFrame(
+    return DataFrame(
         forecast_date = fill(forecast_date, nrow(samples)),
         date = samples.date,
         horizon = Dates.value.(samples.date .- forecast_date),
@@ -195,30 +243,51 @@ function _format_sample_predictions(samples::DataFrame, result)
 end
 
 function _format_quantile_predictions(
-    samples::DataFrame, quantiles::Vector{Float64}, result,
-)
+        samples::DataFrame, quantiles::Vector{Float64}, result,
+    )
     forecast_date = result.observations.date[end]
     grouped = groupby(samples, :date)
     rows = NamedTuple[]
     for g in grouped
         d = g.date[1]
         for q in quantiles
-            push!(rows, (
-                forecast_date = forecast_date,
-                date = d,
-                horizon = Dates.value(d - forecast_date),
-                quantile_level = q,
-                predicted = quantile(g.value, q),
-            ))
+            push!(
+                rows, (
+                    forecast_date = forecast_date,
+                    date = d,
+                    horizon = Dates.value(d - forecast_date),
+                    quantile_level = q,
+                    predicted = quantile(g.value, q),
+                )
+            )
         end
     end
-    DataFrame(rows)
+    return DataFrame(rows)
 end
 
 """
     get_parameters(result) -> Dict{Symbol, Any}
 
-Extract fitted scalar parameters from the chain.
+Get the posterior samples of the scalar parameters of a fitted model, such
+as the Gaussian process hyperparameters and the overdispersion, as a `Dict`
+from parameter name to vector of samples. Vector-valued parameters are left
+out.
+
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref), [`epinow`](@ref),
+  [`estimate_secondary`](@ref) or [`estimate_truncation`](@ref).
+
+```@example get_parameters
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+keys(get_parameters(fit))
+```
 """
 get_parameters(result::EpinowResult) = get_parameters(result.estimates)
 
@@ -231,18 +300,18 @@ function get_parameters(result)
         eltype(draws) <: Real || continue
         params[Symbol(string(vn))] = draws
     end
-    params
+    return params
 end
 
 # ── Summary ──────────────────────────────────────────────────────────────
 
 function Base.summary(
-    result::EstimateInfectionsResult;
-    type::Symbol=:snapshot,
-    target_date::Union{Date, Nothing}=nothing,
-    CrIs::Vector{Float64}=[0.2, 0.5, 0.9]
-)
-    if type == :snapshot
+        result::EstimateInfectionsResult;
+        type::Symbol = :snapshot,
+        target_date::Union{Date, Nothing} = nothing,
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+    )
+    return if type == :snapshot
         date = isnothing(target_date) ? result.observations.date[end] :
             target_date
         _snapshot_summary(result, date, CrIs)
@@ -252,16 +321,16 @@ function Base.summary(
 end
 
 function Base.summary(result::EpinowResult; kwargs...)
-    summary(result.estimates; kwargs...)
+    return summary(result.estimates; kwargs...)
 end
 
 # ── Internal: build result from generated quantities ─────────────────────
 
 function build_result(
-    fit::EpiNow2Fit, data::EpiData, args::EstimateInfectionsArgs,
-    elapsed::Float64;
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
-)
+        fit::EpiNow2Fit, data::EpiData, args::EstimateInfectionsArgs,
+        elapsed::Float64;
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+    )
     dates = _output_dates(fit.metadata)
 
     infections = _summarise_gq(fit, :infections, dates, CrIs)
@@ -277,7 +346,7 @@ function build_result(
     # Growth rate: log-diff of infections
     growth = _compute_growth_rate(fit, dates, CrIs)
 
-    EstimateInfectionsResult(
+    return EstimateInfectionsResult(
         fit, args, data,
         infections, reports, reports_expected, rt_df, rt_unadjusted,
         growth, elapsed,
@@ -288,7 +357,7 @@ function _output_dates(meta::ModelMetadata)
     n_obs = length(meta.dates)
     last_date = meta.dates[end]
     forecast_dates = [last_date + Day(i) for i in 1:meta.horizon]
-    vcat(meta.dates, forecast_dates)
+    return vcat(meta.dates, forecast_dates)
 end
 
 """
@@ -296,12 +365,12 @@ Extract a named field from generated quantities across all samples,
 compute summary statistics.
 """
 function _summarise_gq(
-    fit::EpiNow2Fit, field::Symbol,
-    dates::Vector{Date}, CrIs::Vector{Float64}
-)
+        fit::EpiNow2Fit, field::Symbol,
+        dates::Vector{Date}, CrIs::Vector{Float64}
+    )
     mat, used_dates = _gq_matrix(fit, field, dates)
     isnothing(mat) && return DataFrame()
-    _matrix_to_summary(mat, used_dates, CrIs)
+    return _matrix_to_summary(mat, used_dates, CrIs)
 end
 
 """
@@ -324,7 +393,7 @@ function _gq_matrix(fit::EpiNow2Fit, field::Symbol, dates::Vector{Date})
             mat[t, i] = Float64(vals[t])
         end
     end
-    (mat, dates[1:n_dates])
+    return (mat, dates[1:n_dates])
 end
 
 """Extract a scalar chain parameter as a per-sample vector, or `nothing`."""
@@ -332,7 +401,7 @@ function _chain_vector(fit::EpiNow2Fit, name::Symbol)
     chain = fit.chain
     any(vn -> Symbol(string(vn)) == name, FlexiChains.parameters(chain)) ||
         return nothing
-    vec(Array(chain[name]))
+    return vec(Array(chain[name]))
 end
 
 """
@@ -342,14 +411,14 @@ clamped to a safe positive range, and extreme overdispersion falls back to
 Poisson to avoid degenerate NegBin draws.
 """
 function _draw_obs(
-    rng, μ::Real, family::ObsFamily, overdisp::Union{Nothing, Real}
-)
-    μ = max(min(Float64(μ), 1e15), 1e-6)
+        rng, μ::Real, family::ObsFamily, overdisp::Union{Nothing, Real}
+    )
+    μ = max(min(Float64(μ), 1.0e15), 1.0e-6)
     if family == negbin && !isnothing(overdisp)
         φ = 1.0 / Float64(overdisp)^2
-        φ > 1e-4 && return Float64(rand(rng, NegativeBinomial2(μ, φ)))
+        φ > 1.0e-4 && return Float64(rand(rng, NegativeBinomial2(μ, φ)))
     end
-    Float64(rand(rng, Poisson(μ)))
+    return Float64(rand(rng, Poisson(μ)))
 end
 
 """
@@ -361,9 +430,9 @@ expectations by sampling the fitted observation model per posterior sample.
 local RNG makes the draws reproducible for a given fit.
 """
 function _draw_obs_predictive(
-    expected::Matrix{Float64}, family::ObsFamily,
-    phi_samples::Union{Nothing, AbstractVector}
-)
+        expected::Matrix{Float64}, family::ObsFamily,
+        phi_samples::Union{Nothing, AbstractVector}
+    )
     rng = Random.MersenneTwister(0)
     n_dates, n_samples = size(expected)
     out = Matrix{Float64}(undef, n_dates, n_samples)
@@ -373,7 +442,7 @@ function _draw_obs_predictive(
             out[t, i] = _draw_obs(rng, expected[t, i], family, overdisp)
         end
     end
-    out
+    return out
 end
 
 """
@@ -381,42 +450,44 @@ Summarise the posterior predictive of a generated-quantities field: add
 observation noise to the latent expectation before computing summary stats.
 """
 function _summarise_gq_predictive(
-    fit::EpiNow2Fit, field::Symbol, dates::Vector{Date},
-    CrIs::Vector{Float64}, family::ObsFamily, phi_param::Symbol
-)
+        fit::EpiNow2Fit, field::Symbol, dates::Vector{Date},
+        CrIs::Vector{Float64}, family::ObsFamily, phi_param::Symbol
+    )
     mat, used_dates = _gq_matrix(fit, field, dates)
     isnothing(mat) && return DataFrame()
     phi = family == negbin ? _chain_vector(fit, phi_param) : nothing
     pp = _draw_obs_predictive(mat, family, phi)
-    _matrix_to_summary(pp, used_dates, CrIs)
+    return _matrix_to_summary(pp, used_dates, CrIs)
 end
 
 function _matrix_to_summary(
-    mat::Matrix{Float64}, dates::Vector{Date}, CrIs::Vector{Float64}
-)
+        mat::Matrix{Float64}, dates::Vector{Date}, CrIs::Vector{Float64}
+    )
     # Replace NaN/Inf with 0 for robust quantile computation
     clean = replace(mat, NaN => 0.0, Inf => 0.0, -Inf => 0.0)
 
     base = (
         date = dates,
-        mean = vec(mean(clean; dims=2)),
-        median = vec(mapslices(median, clean; dims=2)),
-        sd = vec(mapslices(std, clean; dims=2))
+        mean = vec(mean(clean; dims = 2)),
+        median = vec(mapslices(median, clean; dims = 2)),
+        sd = vec(mapslices(std, clean; dims = 2)),
     )
     cri_cols = NamedTuple()
     for cri in CrIs
         pct = round(Int, cri * 100)
-        lo = vec(mapslices(v -> quantile(v, (1 - cri) / 2), clean; dims=2))
-        hi = vec(mapslices(v -> quantile(v, (1 + cri) / 2), clean; dims=2))
-        cri_cols = merge(cri_cols,
-            NamedTuple{(Symbol("lower_$pct"), Symbol("upper_$pct"))}((lo, hi)))
+        lo = vec(mapslices(v -> quantile(v, (1 - cri) / 2), clean; dims = 2))
+        hi = vec(mapslices(v -> quantile(v, (1 + cri) / 2), clean; dims = 2))
+        cri_cols = merge(
+            cri_cols,
+            NamedTuple{(Symbol("lower_$pct"), Symbol("upper_$pct"))}((lo, hi))
+        )
     end
-    DataFrame(merge(base, cri_cols))
+    return DataFrame(merge(base, cri_cols))
 end
 
 function _compute_growth_rate(
-    fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}
-)
+        fit::EpiNow2Fit, dates::Vector{Date}, CrIs::Vector{Float64}
+    )
     gqs = fit.generated_quantities
     n_samples = length(gqs)
 
@@ -430,12 +501,12 @@ function _compute_growth_rate(
     for (i, gq) in enumerate(gqs)
         inf = gq[:infections]
         for t in 1:n_growth
-            mat[t, i] = log(max(Float64(inf[t + 1]), 1e-10)) -
-                        log(max(Float64(inf[t]), 1e-10))
+            mat[t, i] = log(max(Float64(inf[t + 1]), 1.0e-10)) -
+                log(max(Float64(inf[t]), 1.0e-10))
         end
     end
 
-    _matrix_to_summary(mat, dates[2:n_dates], CrIs)
+    return _matrix_to_summary(mat, dates[2:n_dates], CrIs)
 end
 
 function _samples_to_quantiles(samples::DataFrame, CrIs::Vector{Float64})
@@ -458,54 +529,73 @@ function _samples_to_quantiles(samples::DataFrame, CrIs::Vector{Float64})
         end
         push!(rows, row)
     end
-    DataFrame(rows)
+    return DataFrame(rows)
 end
 
 function _snapshot_summary(result, date, CrIs)
     # Filter summaries to target date
     rows = NamedTuple[]
     for (name, df) in [
-        (:infections, result.infections),
-        (:rt, result.rt),
-        (:growth_rate, result.growth_rate),
-        (:reports, result.reports)
-    ]
+            (:infections, result.infections),
+            (:rt, result.rt),
+            (:growth_rate, result.growth_rate),
+            (:reports, result.reports),
+        ]
         isempty(df) && continue
         row = filter(r -> r.date == date, df)
         if !isempty(row)
             r = first(eachrow(row))
-            push!(rows, merge((variable=name,), NamedTuple(r)))
+            push!(rows, merge((variable = name,), NamedTuple(r)))
         end
     end
-    DataFrame(rows)
+    return DataFrame(rows)
 end
 
 function _parameter_summary(result, CrIs)
-    vcat(
+    return vcat(
         insertcols!(copy(result.infections), 1, :variable => :infections),
         insertcols!(copy(result.rt), 1, :variable => :rt),
         insertcols!(copy(result.growth_rate), 1, :variable => :growth_rate),
         insertcols!(copy(result.reports), 1, :variable => :reports);
-        cols=:union
+        cols = :union
     )
 end
 
 """
-    get_imputed_reports(result; CrIs=[0.2, 0.5, 0.9])
+    get_imputed_reports(result; CrIs = [0.2, 0.5, 0.9])
 
-Generate integer-valued imputed report draws by sampling from the fitted
-observation model (NegBin or Poisson) for each posterior sample. This is the
-posterior predictive of reported cases — the same quantity surfaced as
-`result.reports`, recomputable here at custom credible-interval levels.
+Summarise integer-valued draws of reported cases from the fitted observation
+model (negative binomial or Poisson) for each posterior sample. This is the
+posterior predictive in `result.reports`, recomputed here for other credible
+intervals.
 
-Returns a summary DataFrame matching the format of `result.reports`.
+# Arguments
+- `result`: a fit from [`estimate_infections`](@ref) or [`epinow`](@ref).
+
+# Keyword Arguments
+- `CrIs`: credible intervals to summarise (default `[0.2, 0.5, 0.9]`).
+
+# Returns
+A summary `DataFrame` in the format of `result.reports`.
+
+```@example get_imputed_reports
+using EpiNow2
+fit = estimate_infections(
+    example_confirmed()[1:30, :];
+    generation_time = gt_opts(example_generation_time()),
+    delays = delay_opts(example_reporting_delay()),
+    inference = inference_opts(samples = 50, warmup = 50, chains = 1, progress = false),
+    verbose = false
+)
+last(get_imputed_reports(fit; CrIs = [0.95]), 5)
+```
 """
 function get_imputed_reports(
-    result::EstimateInfectionsResult;
-    CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
-)
+        result::EstimateInfectionsResult;
+        CrIs::Vector{Float64} = [0.2, 0.5, 0.9]
+    )
     fit = result.fit
-    _summarise_gq_predictive(
+    return _summarise_gq_predictive(
         fit, :reports, _output_dates(fit.metadata), CrIs,
         result.args.obs.family, :reporting_overdispersion
     )
