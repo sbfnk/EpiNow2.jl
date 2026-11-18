@@ -30,10 +30,10 @@ EpiNow2CairoMakieExt = "CairoMakie"
 
 [compat]
 ADTypes = "1"
-CSV = "0.10"
+CSV = "0.10.13"
 CairoMakie = "0.15"
 CensoredDistributions = "0.2"
-DataFrames = "1.6"
+DataFrames = "1.8"
 Dates = "1"
 Distributions = "0.25.117"
 FlexiChains = "0.6"
