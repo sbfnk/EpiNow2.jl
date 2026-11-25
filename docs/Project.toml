@@ -21,7 +21,7 @@ EpiNow2 = {path = ".."}
 EpiAwarePackageTools = {url = "https://github.com/EpiAware/EpiAwarePackageTools.jl", rev = "main"}
 
 [compat]
-CSV = "0.10"
+CSV = "0.10, 1.3"
 CairoMakie = "0.15"
 DataFrames = "1.6"
 Dates = "1"
@@ -33,4 +33,4 @@ ForwardDiff = "0.10, 1"
 Literate = "2"
 Markdown = "1"
 Random = "1"
-Statistics = "~1.10, 1.11.1"
+Statistics = "1.11.1"
