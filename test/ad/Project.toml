@@ -24,7 +24,7 @@ EpiNow2 = {path = "../.."}
 ADTypes = "1"
 DifferentiationInterface = "0.7"
 DifferentiationInterfaceTest = "0.11"
-EpiAwarePackageTools = "0.3, 0.4"
+EpiAwarePackageTools = "0.4.2"
 ForwardDiff = "1"
 Mooncake = "0.5"
 ReverseDiff = "1"
