@@ -30,7 +30,7 @@ EpiNow2CairoMakieExt = "CairoMakie"
 
 [compat]
 ADTypes = "1"
-CSV = "0.10.13"
+CSV = "0.10.13, 1.3"
 CairoMakie = "0.15"
 CensoredDistributions = "0.2"
 DataFrames = "1.8"

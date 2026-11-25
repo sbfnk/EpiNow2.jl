@@ -1,4 +1,6 @@
 # MANAGED by EpiAwarePackageTools.scaffold — do not edit by hand.
+# EPIAWARE_MANAGED_OVERRIDE: both Julia entries ignore FlexiChains 0.7 and
+# later, which Turing does not support yet.
 # Configure Dependabot version updates
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 version: 2
@@ -37,6 +39,9 @@ updates:
       # latency for runner time can set this back to `weekly` — the grouping
       # below is what actually matters.
       interval: "daily"
+    ignore:
+      - dependency-name: "FlexiChains"
+        versions: [">= 0.7"]
     # One grouped PR per run for all Julia dependency bumps across the
     # workspace environments, rather than a separate PR per package (#249).
     groups:
@@ -84,6 +89,9 @@ updates:
       - "/docs/environments/**"
     schedule:
       interval: "daily"
+    ignore:
+      - dependency-name: "FlexiChains"
+        versions: [">= 0.7"]
     groups:
       julia-isolated:
         patterns:

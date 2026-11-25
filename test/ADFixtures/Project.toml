@@ -18,3 +18,14 @@ EpiNow2 = "104aee9f-613f-4156-b2ce-c4bbd753b83e"
 
 [sources]
 EpiNow2 = {path = "../.."}
+
+[compat]
+ADTypes = "1"
+DifferentiationInterface = "0.7"
+DifferentiationInterfaceTest = "0.11"
+Distributions = "0.25.117"
+DynamicPPL = "0.42"
+ForwardDiff = "1"
+LogDensityProblems = "2"
+Mooncake = "0.5"
+ReverseDiff = "1"
