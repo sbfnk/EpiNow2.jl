@@ -1,3 +1,4 @@
+# Run with: julia --project=test benchmark/infections_gradient.jl
 using EpiNow2, Distributions, ForwardDiff, Profile
 
 gt = UncertainDistribution(
