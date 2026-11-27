@@ -17,7 +17,7 @@ inc = UncertainDistribution(
 assembled = EpiNow2.assemble_model(
     EpiNow2.EpiData(first(EpiNow2.example_confirmed(), 60));
     generation_time = gt_opts(gt),
-    delays = delay_opts(discretise(inc + LogNormal(0.5, 0.5))),
+    delays = delay_opts(inc + discretise(LogNormal(0.5, 0.5))),
     truncation = trunc_opts(), rt = rt_opts(), backcalc = backcalc_opts(),
     gp = gp_opts(), obs = obs_opts(), forecast = forecast_opts(horizon = 14)
 )
