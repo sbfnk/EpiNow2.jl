@@ -46,6 +46,38 @@
     @test sum(composed.pmf) ≈ 1.0
 end
 
+@testitem "Gamma delay discretisation preserves probabilities and gradients" setup = [TestSetup] begin
+    using ForwardDiff
+
+    for pars in ([0.8, 2.0], [1.4, 1 / 0.38], [4.3, 1.1]), max_delay in (4, 14)
+        pmf(x) = EpiNow2.discretise_ad(Gamma(x...), max_delay)
+        function reference_pmf(x)
+            cd = EpiNow2.CensoredDistributions.double_interval_censored(
+                Gamma(x...); interval = 1, upper = max_delay + 1
+            )
+            reference = [exp(logpdf(cd, k)) for k in 0:max_delay]
+            return reference ./ sum(reference)
+        end
+        @test pmf(pars) ≈ reference_pmf(pars)
+
+        h = 1.0e-5
+        finite_difference = hcat(
+            [
+                let a = copy(pars), b = copy(pars)
+                    a[i] += h
+                    b[i] -= h
+                    (pmf(a) - pmf(b)) ./ (2h)
+                end for i in eachindex(pars)
+            ]...
+        )
+        @test isapprox(ForwardDiff.jacobian(pmf, pars), finite_difference; rtol = 1.0e-4, atol = 1.0e-6)
+        @test isapprox(
+            EpiNow2.ReverseDiff.jacobian(pmf, pars),
+            EpiNow2.ReverseDiff.jacobian(reference_pmf, pars); atol = 1.0e-10
+        )
+    end
+end
+
 @testitem "example delay distributions" setup = [TestSetup] begin
     @test example_generation_time() isa LogNormal
     @test example_incubation_period() isa LogNormal
