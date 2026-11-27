@@ -333,6 +333,27 @@ function discretise_ad(d::Distribution, max_val::Int)
     return pmf ./ sum(pmf)
 end
 
+function discretise_ad(d::Gamma, max_val::Int)
+    cd = double_interval_censored(d; interval = 1, upper = max_val + 1)
+    base = CensoredDistributions.get_dist(cd)
+    lo, hi = minimum(base), maximum(base)
+    try
+        # Adjacent delay intervals share a CDF boundary.
+        cdfs = [k <= lo ? 0.0 : k >= hi ? 1.0 : cdf(base, k) for k in 0:(max_val + 1)]
+        pmf = [
+            let p = cdfs[k + 2] - cdfs[k + 1]
+                Distributions.insupport(cd, k) && p > 0 ? exp(log(p)) : zero(p)
+            end for k in 0:max_val
+        ]
+        return pmf ./ sum(pmf)
+    catch e
+        if e isa DomainError || e isa BoundsError || e isa ArgumentError
+            return invoke(discretise_ad, Tuple{Distribution, Int}, d, max_val)
+        end
+        rethrow()
+    end
+end
+
 # ── Internal helpers ─────────────────────────────────────────────────────
 
 function _moments_to_lognormal(mean, sd)
